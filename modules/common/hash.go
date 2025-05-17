@@ -17,6 +17,15 @@ func (h *Hash) SetBytes(buf []byte) {
 	copy(h[:], buf)
 }
 
+func (h Hash) IsValid() bool {
+	for _, b := range h {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (h Hash) Bytes() []byte {
 	return h[:]
 }
