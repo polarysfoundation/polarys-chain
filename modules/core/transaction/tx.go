@@ -23,4 +23,5 @@ type TxData struct {
 	GasPrice  uint64         `json:"gas_price"`
 	Version   Version        `json:"version"`
 	Payload   []byte         `json:"payload"`
+	Timestamp uint64         `json:"timestamp"`
 }

@@ -2,10 +2,13 @@ package block
 
 import (
 	"encoding/json"
+	"math/big"
 
+	pec256 "github.com/polarysfoundation/pec-256"
 	pm256 "github.com/polarysfoundation/pm-256"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
+	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 )
 
 type Block struct {
@@ -97,3 +100,37 @@ func (b *Block) Hash() common.Hash {
 	return b.hash
 }
 
+func (b *Block) SignBlock(priv pec256.PrivKey) error {
+	data, err := b.header.Serialize()
+	if err != nil {
+		return err
+	}
+
+	h := crypto.Pm256(data)
+	r, s, err := crypto.Sign(common.BytesToHash(h), priv)
+	if err != nil {
+		return err
+	}
+
+	signature := make([]byte, 64)
+	copy(signature[:32], r.Bytes())
+	copy(signature[32:], s.Bytes())
+
+	b.header.Signature = signature
+
+	return nil
+}
+
+func (b *Block) VerifyBlock(pub pec256.PubKey) (bool, error) {
+	data, err := b.header.Serialize()
+	if err != nil {
+		return false, err
+	}
+
+	h := crypto.Pm256(data)
+
+	r := new(big.Int).SetBytes(b.header.Signature[:32])
+	s := new(big.Int).SetBytes(b.header.Signature[32:])
+
+	return crypto.Verify(common.BytesToHash(h), r, s, pub)
+}
