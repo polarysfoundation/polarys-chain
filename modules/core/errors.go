@@ -3,5 +3,6 @@ package core
 import "errors"
 
 var (
-	ErrBlockNotFound = errors.New("block not found")
+	ErrBlockNotInitialized = errors.New("block not initialized")
+	ErrBlockNotFound       = errors.New("block not found")
 )

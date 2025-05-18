@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
+	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	polarysdb "github.com/polarysfoundation/polarys_db"
 )
 
@@ -128,6 +129,29 @@ func (g *GenesisBlock) Deserialize(data []byte) error {
 	g.Validator = temp.Validator
 
 	return nil
+}
+
+func (g *GenesisBlock) ToBlock() (*block.Block, error) {
+	if g != nil {
+		return block.NewBlock(block.Header{
+			Height:          g.Height,
+			Prev:            g.Prev,
+			Timestamp:       g.Timestamp,
+			Nonce:           g.Nonce,
+			GasTarget:       g.GasTarget,
+			GasTip:          g.GasTip,
+			GasUsed:         g.GasUsed,
+			Difficulty:      g.Difficulty,
+			TotalDifficulty: g.TotalDifficulty,
+			Data:            g.Data,
+			ValidatorProof:  g.ValidatorProof,
+			ConsensusProof:  g.ConsensusProof,
+			Signature:       g.Signature,
+			Validator:       g.Validator,
+		}, nil), nil
+	}
+
+	return nil, ErrBlockNotInitialized
 }
 
 func (g *GenesisBlock) Serialize() ([]byte, error) {
