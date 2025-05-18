@@ -103,3 +103,31 @@ func hexToByte(b byte) byte {
 		return 0
 	}
 }
+
+func Uint64ToBytes(n uint64) []byte {
+	b := make([]byte, 8)
+	b[0] = byte(n >> 56)
+	b[1] = byte(n >> 48)
+	b[2] = byte(n >> 40)
+	b[3] = byte(n >> 32)
+	b[4] = byte(n >> 24)
+	b[5] = byte(n >> 16)
+	b[6] = byte(n >> 8)
+	b[7] = byte(n)
+	return b
+}
+
+func BytesToUint64(b []byte) uint64 {
+	if len(b) != 8 {
+		return 0
+	}
+	n := uint64(b[0]) << 56
+	n |= uint64(b[1]) << 48
+	n |= uint64(b[2]) << 40
+	n |= uint64(b[3]) << 32
+	n |= uint64(b[4]) << 24
+	n |= uint64(b[5]) << 16
+	n |= uint64(b[6]) << 8
+	n |= uint64(b[7])
+	return n
+}

@@ -8,11 +8,7 @@ import (
 	polarysdb "github.com/polarysfoundation/polarys_db"
 )
 
-var (
-	metricByNumber = "block/number/"
-	metricByHash   = "block/hash/"
-	metricCurrent  = "block/current/"
-)
+
 
 var (
 	zeroHash    = common.Hash([32]byte{})

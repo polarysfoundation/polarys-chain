@@ -14,10 +14,14 @@ type Block struct {
 	header       Header
 	transactions []transaction.Transaction
 	hash         common.Hash
+	sealHash     common.Hash
 }
 
 func NewBlock(header Header, transactions []transaction.Transaction) *Block {
-	
+
+	size := header.CalculateSize()
+	header.Size = size
+
 	return &Block{
 		header:       header,
 		transactions: transactions,
@@ -64,6 +68,10 @@ func (b *Block) GasTip() uint64 {
 	return b.header.GasTip
 }
 
+func (b *Block) Size() uint64 {
+	return b.header.Size
+}
+
 func (b *Block) GasUsed() uint64 {
 	return b.header.GasUsed
 }
@@ -98,6 +106,14 @@ func (b *Block) Hash() common.Hash {
 
 	b.hash = common.BytesToHash(hash[:])
 	return b.hash
+}
+
+func (b *Block) SealHash() common.Hash {
+	return b.sealHash
+}
+
+func (b *Block) Seal(seal common.Hash) {
+	b.sealHash = seal
 }
 
 func (b *Block) SignBlock(priv pec256.PrivKey) error {
