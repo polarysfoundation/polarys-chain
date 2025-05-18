@@ -1,7 +1,6 @@
 package block
 
 import (
-	"encoding/json"
 	"math/big"
 
 	pec256 "github.com/polarysfoundation/pec-256"
@@ -18,6 +17,7 @@ type Block struct {
 }
 
 func NewBlock(header Header, transactions []transaction.Transaction) *Block {
+	
 	return &Block{
 		header:       header,
 		transactions: transactions,
@@ -89,7 +89,7 @@ func (b *Block) Hash() common.Hash {
 		return b.hash
 	}
 
-	data, err := json.Marshal(b.header)
+	data, err := b.header.Serialize()
 	if err != nil {
 		panic(err)
 	}

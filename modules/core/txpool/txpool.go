@@ -168,17 +168,38 @@ func (t *TxPool) ProcessTransaction() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	seal := make([]byte, 64)
+	seal := make([]byte, 96)
 	h1 := crypto.Pm256(t.poolAddress.Bytes())
 	h2 := crypto.Pm256(t.executor.Bytes())
 	copy(seal[:32], h1)
 	copy(seal[32:], h2)
 
 	for _, tx := range t.pendingTransactions {
-		tx.SealTx(seal)
+		h3 := crypto.Pm256(tx.Hash().Bytes())
+		copy(seal[64:], h3)
+		sealHash := crypto.Pm256(seal)
+		tx.SealTx(common.BytesToHash(sealHash))
 
 		t.sealedTransactions = append(t.sealedTransactions, tx)
 	}
+}
+
+func (t *TxPool) Update() error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
+	err := save(t.db, t)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (t *TxPool) AddBalance(amount *big.Int) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.poolBalance.Add(t.poolBalance, amount)
 }
 
 func save(db *polarysdb.Database, pool *TxPool) error {
