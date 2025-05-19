@@ -7,11 +7,15 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
+	"slices"
 )
 
 var (
-	MaxDifficulty = uint64(0xFFFFFFFFFFFFFFFF)
-	MaxNonce      = uint64(0xFFFFFFFFFFFFFFFF)
+	MaxDifficulty      = uint64(0xFFFFFFFFFFFFFFFF)
+	MaxNonce           = uint64(0xFFFFFFFFFFFFFFFF)
+	DifficultyInterval = uint64(1000)
+	MinDifficulty      = uint64(1)
+	DifficultyDivisor  = uint64(10000)
 )
 
 var (
@@ -27,6 +31,8 @@ type Consensus struct {
 	chainID          uint64
 	currentValidator common.Address
 	latestValidator  common.Address
+	lastAdjustment   uint64
+	lastDifficulty   uint64
 }
 
 func InitConsensus(epoch, difficulty, delay, chainID uint64) *Consensus {
@@ -92,7 +98,16 @@ func (c *Consensus) SealBlock(block *block.Block) ([]byte, error) {
 }
 
 func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool, error) {
-	if !c.verifyConsensusProof(block) {
+	prevBlock, err := chain.GetBlockByHeight(block.Height() - 1)
+	if err != nil {
+		return false, err
+	}
+
+	if prevBlock.Hash() != block.Prev() {
+		return false, ErrInvalidBlockHash
+	}
+
+	if !c.verifyConsensusProof(block, prevBlock) {
 		return false, ErrInvalidConsensusProof
 	}
 
@@ -102,10 +117,6 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 
 	if !c.ValidatorExists(block.Validator()) {
 		return false, ErrInvalidValidator
-	}
-
-	if !c.DifficultyValidator(block) {
-		return false, ErrInvalidDifficulty
 	}
 
 	latestBlock, err := chain.GetLatestBlock()
@@ -139,10 +150,9 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 	}
 
 	return true, nil
-
 }
 
-func (c *Consensus) verifyConsensusProof(block *block.Block) bool {
+func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) bool {
 	consensusProof := block.ConsensusProof()
 	if len(consensusProof) != 64 {
 		return false
@@ -176,7 +186,7 @@ func (c *Consensus) verifyConsensusProof(block *block.Block) bool {
 		return false
 	}
 
-	if !c.DifficultyValidator(block) {
+	if !c.DifficultyValidator(block, prevBlock) {
 		return false
 	}
 
@@ -213,15 +223,57 @@ func (c *Consensus) verifyValidatorProof(block *block.Block) bool {
 }
 
 func (c *Consensus) ValidatorExists(address common.Address) bool {
-	for _, validator := range c.validators {
-		if validator == address {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.validators, address)
 }
 
-func (c *Consensus) DifficultyValidator(block *block.Block) bool {
+func (c *Consensus) AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64 {
+	if block.Height()%c.epoch != 0 {
+		return c.difficulty
+	}
+
+	if block.Height() == 0 {
+		c.difficulty = MinDifficulty
+		return c.difficulty
+	}
+
+	newDifficulty := c.calcDifficulty(block, prevBlock)
+	if newDifficulty != c.difficulty {
+		c.difficulty = newDifficulty
+		c.lastAdjustment = block.Height()
+		c.lastDifficulty = newDifficulty
+	}
+
+	if c.difficulty < MinDifficulty {
+		c.difficulty = MinDifficulty
+	} else if c.difficulty > MaxDifficulty {
+		c.difficulty = MaxDifficulty
+	}
+
+	return c.difficulty
+}
+
+// DifficultyValidator checks if the block's difficulty is valid based on expected difficulty.
+// It compares the block's difficulty with the calculated difficulty using previous block data.
+func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Block) bool {
+	// Genesis block: always valid
+	if block.Height() == 0 {
+		return true
+	}
+
+	// Get previous block (must be implemented in your chain)
+	if prevBlock == nil {
+		return false
+	}
+
+	expectedDifficulty := c.calcDifficulty(block, prevBlock)
+	blockDifficulty := block.Difficulty()
+
+	// Allow a small margin for difficulty drift (optional)
+	const margin = 0 // set to 0 for strict equality, or small value for tolerance
+
+	if blockDifficulty < expectedDifficulty-margin || blockDifficulty > expectedDifficulty+margin {
+		return false
+	}
 	return true
 }
 
@@ -234,6 +286,44 @@ func (c *Consensus) SelectValidator() common.Address {
 	return nextVal
 }
 
-func (c *Consensus) calcDifficulty() {
+// calcDifficulty calculates the next block difficulty based on recent block data.
+// It uses gas usage, block time, and previous difficulty to adjust the difficulty dynamically.
+func (c *Consensus) calcDifficulty(block *block.Block, prevBlock *block.Block) uint64 {
+	// Get previous difficulty
+	prevDifficulty := c.difficulty
+	if block.Height() == 0 {
+		return prevDifficulty
+	}
 
+	// Get gas usage ratio (target/used)
+	gasUsed := block.GasUsed()
+	gasTarget := block.GasTarget()
+	var gasRatio float64
+	if gasUsed == 0 {
+		gasRatio = 1.0 // Avoid division by zero, treat as optimal
+	} else {
+		gasRatio = float64(gasTarget) / float64(gasUsed)
+	}
+
+	// Get block time delta (current - previous)
+	blockTime := block.Timestamp()
+	prevBlockTime := prevBlock.Timestamp()
+	timeDelta := blockTime - prevBlockTime
+	if timeDelta == 0 {
+		timeDelta = 1 // Avoid division by zero
+	}
+
+	// Calculate adjustment factor based on gas usage and block time
+	// If blocks are too fast or gas is overused, increase difficulty
+	// If blocks are too slow or gas is underused, decrease difficulty
+	targetBlockTime := c.delay
+	timeFactor := float64(targetBlockTime) / float64(timeDelta)
+
+	// Weighted adjustment: 70% block time, 30% gas usage
+	adjustment := max(min(0.7*timeFactor+0.3*gasRatio, 1.2), 0.8)
+
+	// Calculate new difficulty
+	newDifficulty := min(max(uint64(float64(prevDifficulty)*adjustment), MinDifficulty), MaxDifficulty)
+
+	return newDifficulty
 }

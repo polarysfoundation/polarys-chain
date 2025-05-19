@@ -1,6 +1,7 @@
 package block
 
 import (
+	"encoding/json"
 	"math/big"
 
 	pec256 "github.com/polarysfoundation/pec-256"
@@ -22,10 +23,72 @@ func NewBlock(header Header, transactions []transaction.Transaction) *Block {
 	size := header.CalculateSize()
 	header.Size = size
 
-	return &Block{
-		header:       header,
-		transactions: transactions,
+	blk := &Block{
+		header: header,
 	}
+
+	if len(transactions) > 0 {
+		blk.transactions = transactions
+	} else {
+		blk.transactions = make([]transaction.Transaction, 0)
+	}
+
+	return blk
+}
+
+func (b *Block) Serialize() ([]byte, error) {
+	temp := struct {
+		Header       Header      `json:"header"`
+		Hash         common.Hash `json:"hash"`
+		Transactions uint64      `json:"transactions"`
+		SealHash     common.Hash `json:"seal_hash"`
+	}{
+		Header:       b.header,
+		Hash:         b.hash,
+		Transactions: uint64(len(b.transactions)),
+		SealHash:     b.sealHash,
+	}
+
+	data, err := json.Marshal(temp)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction) error {
+	temp := struct {
+		Header       Header      `json:"header"`
+		Hash         common.Hash `json:"hash"`
+		Transactions uint64      `json:"transactions"`
+		SealHash     common.Hash `json:"seal_hash"`
+	}{}
+
+	err := json.Unmarshal(data, &temp)
+	if err != nil {
+		return err
+	}
+
+	temp.Header.Size = temp.Header.CalculateSize()
+
+	b.header = temp.Header
+	b.hash = temp.Hash
+	b.sealHash = temp.SealHash
+
+	b.transactions = make([]transaction.Transaction, temp.Transactions)
+	copy(b.transactions, transactions)
+	return nil
+}
+
+func (b *Block) AddTransaction(tx transaction.Transaction) {
+	for _, t := range b.transactions {
+		if t.Hash() == tx.Hash() {
+			return
+		}
+	}
+
+	b.transactions = append(b.transactions, tx)
 }
 
 func (b *Block) Timestamp() uint64 {

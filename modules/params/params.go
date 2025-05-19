@@ -9,6 +9,13 @@ import (
 var (
 	TestnetHash = common.StringToHash("")
 
+	DefaultConfig = &Config{
+		MaxProposalSize: 1024 * 1024,
+		MaxTxSize:       1024 * 1024,
+		MaxBlockSize:    1024 * 1024,
+		MaxTxPerBlock:   1000,
+	}
+
 	Polarys = &ChainParams{
 		PolarysBlock: big.NewInt(0),
 		ChainID:      0,
@@ -30,4 +37,8 @@ type PowEngine struct {
 	Epoch      uint64
 	Difficulty uint64
 	Delay      uint64
+}
+
+func (c *PowEngine) String() string {
+	return "pow_engine"
 }

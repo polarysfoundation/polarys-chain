@@ -2,13 +2,12 @@ package core
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	polarysdb "github.com/polarysfoundation/polarys_db"
 )
-
-
 
 var (
 	zeroHash    = common.Hash([32]byte{})
@@ -30,6 +29,7 @@ type GenesisBlock struct {
 	ConsensusProof  []byte         `json:"consensus_proof"`
 	Signature       []byte         `json:"signature"`
 	Validator       common.Address `json:"validator"`
+	Size            uint64         `json:"size"`
 }
 
 func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBlock) (*GenesisBlock, error) {
@@ -44,13 +44,24 @@ func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBloc
 
 	if dfChain && genesis == nil {
 		gb := defaultBlock()
-		err = saveGenesisBlock(db, gb)
+
+		blk, err := gb.ToBlock()
+		if err != nil {
+			return nil, err
+		}
+
+		err = saveBlock(db, blk)
 		if err != nil {
 			return nil, err
 		}
 		return gb, nil
 	} else {
-		err = saveGenesisBlock(db, genesis)
+		blk, err := genesis.ToBlock()
+		if err != nil {
+			return nil, err
+		}
+
+		err = saveBlock(db, blk)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +83,7 @@ func defaultBlock() *GenesisBlock {
 	gb := &GenesisBlock{
 		Height:          0,
 		Prev:            zeroHash,
-		Timestamp:       0,
+		Timestamp:       uint64(time.Now().Unix()),
 		Nonce:           0,
 		GasTarget:       0,
 		GasTip:          0,
@@ -115,7 +126,6 @@ func (g *GenesisBlock) Deserialize(data []byte) error {
 	g.Nonce = temp.Nonce
 	g.GasTarget = temp.GasTarget
 	g.GasTip = temp.GasTip
-
 	g.GasUsed = temp.GasUsed
 	g.Difficulty = temp.Difficulty
 	g.TotalDifficulty = temp.TotalDifficulty
@@ -144,6 +154,7 @@ func (g *GenesisBlock) ToBlock() (*block.Block, error) {
 			ConsensusProof:  g.ConsensusProof,
 			Signature:       g.Signature,
 			Validator:       g.Validator,
+			Size:            g.Size,
 		}, nil), nil
 	}
 
@@ -219,41 +230,41 @@ func hasGenesisBlock(db *polarysdb.Database) bool {
 	return ok
 }
 
-func saveGenesisBlock(db *polarysdb.Database, g *GenesisBlock) error {
-	err := db.Write(metricByNumber, "0", g)
-	if err != nil {
-		return err
-	}
-	err = db.Write(metricByHash, g.Hash().String(), g)
-	if err != nil {
-		return err
-	}
-
-	err = db.Write(metricCurrent, "0", g)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func getGenesisBlock(db *polarysdb.Database) (*GenesisBlock, error) {
 	data, ok := db.Read(metricByNumber, "0")
 	if !ok {
 		return nil, ErrBlockNotFound
 	}
 
-	var g GenesisBlock
+	var g *block.Block
 
 	b, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 
-	err = g.Deserialize(b)
+	err = json.Unmarshal(b, &g)
 	if err != nil {
 		return nil, err
 	}
 
-	return &g, nil
+	gb := &GenesisBlock{
+		Height:          g.Height(),
+		Prev:            g.Prev(),
+		Timestamp:       g.Timestamp(),
+		Nonce:           g.Nonce(),
+		GasTarget:       g.GasTarget(),
+		GasTip:          g.GasTip(),
+		GasUsed:         g.GasUsed(),
+		Difficulty:      g.Difficulty(),
+		TotalDifficulty: g.TotalDifficulty(),
+		Data:            g.Data(),
+		ValidatorProof:  g.ValidatorProof(),
+		ConsensusProof:  g.ConsensusProof(),
+		Signature:       g.Signature(),
+		Validator:       g.Validator(),
+		Size:            g.Size(),
+	}
+
+	return gb, nil
 }

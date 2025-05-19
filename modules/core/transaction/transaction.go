@@ -36,12 +36,51 @@ func NewTransaction(from common.Address, to common.Address, value *big.Int, data
 	}
 }
 
+func (t *Transaction) Serialize() ([]byte, error) {
+	temp := struct {
+		TxData   TxData      `json:"tx_data"`
+		Hash     common.Hash `json:"hash"`
+		SealHash common.Hash `json:"seal_hash"`
+	}{
+		TxData:   t.data,
+		Hash:     t.hash,
+		SealHash: t.sealHash,
+	}
+
+	b, err := json.Marshal(temp)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+func (t *Transaction) Deserialize(data []byte) error {
+	temp := struct {
+		TxData   TxData      `json:"tx_data"`
+		Hash     common.Hash `json:"hash"`
+		SealHash common.Hash `json:"seal_hash"`
+	}{}
+
+	err := json.Unmarshal(data, &temp)
+	if err != nil {
+		return err
+	}
+
+	t.data = temp.TxData
+	t.hash = temp.Hash
+	t.sealHash = temp.SealHash
+
+	return nil
+
+}
+
 func (t *Transaction) Hash() common.Hash {
 	if t.hash.IsValid() {
 		return t.hash
 	}
 
-	data, err := json.Marshal(t.data)
+	data, err := t.data.Serialize()
 	if err != nil {
 		panic(err)
 	}
