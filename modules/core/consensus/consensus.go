@@ -6,11 +6,14 @@ import (
 )
 
 type Engine interface {
-	InitConsensus(epoch, difficulty, delay uint64) error
 	ConsensusProof(chainID uint64, crrBlockNumber uint64) ([]byte, error)
-	VerifyBlock(block *block.Block) bool
+	ValidatorProof(block *block.Block) ([]byte, error)
 	ValidatorExists(validator common.Address) bool
+	VerifyBlock(block *block.Block) bool
 	DifficultyValidator(block *block.Block) bool
+	SealBlock(block *block.Block) (*block.Block, error)
+	AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64
+	SelectValidator() common.Address
 }
 
 type Chain interface {

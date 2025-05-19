@@ -73,7 +73,7 @@ func (c *Consensus) ValidatorProof() ([]byte, error) {
 	return validatorProof, nil
 }
 
-func (c *Consensus) SealBlock(block *block.Block) ([]byte, error) {
+func (c *Consensus) SealBlock(block *block.Block) (*block.Block, error) {
 	consensusProof, err := c.ConsensusProof(block.Height())
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (c *Consensus) SealBlock(block *block.Block) ([]byte, error) {
 	sealHash := crypto.Pm256(buff)
 	block.Seal(common.BytesToHash(sealHash))
 
-	return sealHash, nil
+	return block, nil
 }
 
 func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool, error) {
@@ -150,6 +150,57 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 	}
 
 	return true, nil
+}
+
+func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
+	latestBlock, err := chain.GetLatestBlock()
+	if err != nil {
+		return false, err
+	}
+
+	if latestBlock.Height() == 0 {
+		return true, nil
+	}
+
+	for i := uint64(0); i < latestBlock.Height(); i++ {
+		currentBlock, err := chain.GetBlockByHeight(i)
+		if err != nil {
+			return false, err
+		}
+
+		prevBlock, err := chain.GetBlockByHeight(currentBlock.Height() - 1)
+		if err != nil {
+			return false, err
+		}
+
+		if !common.Equal(currentBlock.Hash().Bytes(), currentBlock.CalcHash().Bytes()) {
+			return false, ErrInvalidBlockHash
+		}
+
+		if !common.Equal(prevBlock.Hash().Bytes(), currentBlock.Prev().Bytes()) {
+			return false, ErrInvalidBlockHash
+		}
+
+		target := c.GenerateTarget(currentBlock)
+		if currentBlock.Difficulty() > target.Uint64() {
+			return false, ErrInvalidDifficulty
+		}
+	}
+
+	return true, nil
+}
+
+func (c *Consensus) GenerateTarget(block *block.Block) *big.Int {
+	target := new(big.Int).SetUint64(c.difficulty)
+	if block.Height() == 0 {
+		return target
+	}
+
+	if block.Height()%c.epoch == 0 {
+		target = new(big.Int).Mul(target, big.NewInt(int64(DifficultyDivisor)))
+	}
+
+	return target
 }
 
 func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) bool {

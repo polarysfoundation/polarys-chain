@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	pec256 "github.com/polarysfoundation/pec-256"
-	pm256 "github.com/polarysfoundation/pm-256"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
@@ -55,6 +54,17 @@ func (b *Block) Serialize() ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func (b *Block) CalcHash() common.Hash {
+	data, err := b.header.Serialize()
+	if err != nil {
+		panic(err)
+	}
+
+	h := crypto.Pm256(data)
+	b.hash = common.BytesToHash(h)
+	return b.hash
 }
 
 func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction) error {
@@ -160,15 +170,7 @@ func (b *Block) Hash() common.Hash {
 		return b.hash
 	}
 
-	data, err := b.header.Serialize()
-	if err != nil {
-		panic(err)
-	}
-
-	hash := pm256.Sum256(data)
-
-	b.hash = common.BytesToHash(hash[:])
-	return b.hash
+	return common.Hash{}
 }
 
 func (b *Block) SealHash() common.Hash {
