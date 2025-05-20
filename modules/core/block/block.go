@@ -15,6 +15,7 @@ type Block struct {
 	transactions []transaction.Transaction
 	hash         common.Hash
 	sealHash     common.Hash
+	slotHash     common.Hash
 }
 
 func NewBlock(header Header, transactions []transaction.Transaction) *Block {
@@ -41,11 +42,13 @@ func (b *Block) Serialize() ([]byte, error) {
 		Hash         common.Hash `json:"hash"`
 		Transactions uint64      `json:"transactions"`
 		SealHash     common.Hash `json:"seal_hash"`
+		SlotHash     common.Hash `json:"slot_hash"`
 	}{
 		Header:       b.header,
 		Hash:         b.hash,
 		Transactions: uint64(len(b.transactions)),
 		SealHash:     b.sealHash,
+		SlotHash:     b.slotHash,
 	}
 
 	data, err := json.Marshal(temp)
@@ -73,6 +76,7 @@ func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction)
 		Hash         common.Hash `json:"hash"`
 		Transactions uint64      `json:"transactions"`
 		SealHash     common.Hash `json:"seal_hash"`
+		SlotHash     common.Hash `json:"slot_hash"`
 	}{}
 
 	err := json.Unmarshal(data, &temp)
@@ -80,15 +84,22 @@ func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction)
 		return err
 	}
 
-	temp.Header.Size = temp.Header.CalculateSize()
-
 	b.header = temp.Header
 	b.hash = temp.Hash
 	b.sealHash = temp.SealHash
+	b.slotHash = temp.SlotHash
 
 	b.transactions = make([]transaction.Transaction, temp.Transactions)
 	copy(b.transactions, transactions)
 	return nil
+}
+
+func (b *Block) SetSlotHash(hash common.Hash) {
+	b.slotHash = hash
+}
+
+func (b *Block) SlotHash() common.Hash {
+	return b.slotHash
 }
 
 func (b *Block) AddTransaction(tx transaction.Transaction) {

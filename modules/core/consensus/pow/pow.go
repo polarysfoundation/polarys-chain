@@ -49,6 +49,10 @@ func InitConsensus(epoch, difficulty, delay, chainID uint64) *Consensus {
 	}
 }
 
+func (c *Consensus) Validator() common.Address {
+	return c.currentValidator
+}
+
 func (c *Consensus) ConsensusProof(crrBlockNumber uint64) ([]byte, error) {
 	consensusProof := make([]byte, 64)
 	buff := make([]byte, 32)
@@ -67,7 +71,7 @@ func (c *Consensus) ValidatorProof() ([]byte, error) {
 	copy(validatorProof[:8], common.Uint64ToBytes(c.chainID))
 	copy(validatorProof[:8], common.Uint64ToBytes(c.epoch))
 	copy(validatorProof[16:], c.currentValidator.Bytes())
-	copy(validatorProof[1:], common.Uint64ToBytes(uint64(len(c.validators))))
+	copy(validatorProof[1:], []byte{0x1f})
 	copy(validatorProof[32:], c.protocolHash.Bytes())
 
 	return validatorProof, nil

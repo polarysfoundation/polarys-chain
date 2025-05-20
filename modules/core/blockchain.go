@@ -95,6 +95,14 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	return bc, nil
 }
 
+func (bc *Blockchain) ChainID() uint64 {
+	return bc.chainID
+}
+
+func (bc *Blockchain) ConsensusProof() []byte {
+	return bc.consensusProof
+}
+
 func (bc *Blockchain) GetChainID() uint64 {
 	return bc.chainID
 }

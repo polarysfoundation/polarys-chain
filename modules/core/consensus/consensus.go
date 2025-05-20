@@ -5,6 +5,10 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 )
 
+var (
+	SystemAddress = common.CXIDToAddress("1cxffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
+
 type Engine interface {
 	ConsensusProof(chainID uint64, crrBlockNumber uint64) ([]byte, error)
 	ValidatorProof(block *block.Block) ([]byte, error)
@@ -14,6 +18,7 @@ type Engine interface {
 	SealBlock(block *block.Block) (*block.Block, error)
 	AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64
 	SelectValidator() common.Address
+	Validator() common.Address
 }
 
 type Chain interface {
