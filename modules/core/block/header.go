@@ -54,6 +54,8 @@ func (h *Header) CalculateSize() uint64 {
 	// Adding data size
 	size += calcSliceSize(h.Data)
 
+	h.Size = size
+
 	return size
 }
 

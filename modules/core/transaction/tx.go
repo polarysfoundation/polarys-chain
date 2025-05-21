@@ -22,6 +22,7 @@ type TxData struct {
 	Signature []byte         `json:"signature"`
 	GasTip    uint64         `json:"gas_tip"`
 	GasPrice  uint64         `json:"gas_price"`
+	Gas       uint64         `json:"gas"`
 	Version   Version        `json:"version"`
 	Payload   []byte         `json:"payload"`
 	Timestamp uint64         `json:"timestamp"`
@@ -36,6 +37,7 @@ func (t *TxData) Serialize() ([]byte, error) {
 		Nonce     uint64         `json:"nonce"`
 		GasTip    uint64         `json:"gas_tip"`
 		GasPrice  uint64         `json:"gas_price"`
+		Gas       uint64         `json:"gas"`
 		Version   Version        `json:"version"`
 		Payload   []byte         `json:"payload"`
 		Timestamp uint64         `json:"timestamp"`
@@ -47,6 +49,7 @@ func (t *TxData) Serialize() ([]byte, error) {
 		Nonce:     t.Nonce,
 		GasTip:    t.GasTip,
 		GasPrice:  t.GasPrice,
+		Gas:       t.Gas,
 		Version:   t.Version,
 		Payload:   t.Payload,
 		Timestamp: t.Timestamp,

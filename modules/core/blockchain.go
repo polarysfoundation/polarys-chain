@@ -16,16 +16,19 @@ import (
 )
 
 type Blockchain struct {
-	chainID        uint64
-	chainConfig    *params.Config
-	genesis        block.Block
-	localBlocks    []*block.Block
-	txPool         *txpool.TxPool
-	consensusProof []byte
-	epoch          uint64
-	delay          uint64
-	consensus      consensus.Engine
-	latestBlock    *block.Block
+	chainID         uint64
+	chainConfig     *params.Config
+	genesis         block.Block
+	localBlocks     []*block.Block
+	txPool          *txpool.TxPool
+	consensusProof  []byte
+	epoch           uint64
+	delay           uint64
+	consensus       consensus.Engine
+	latestBlock     *block.Block
+	gasTarget       uint64
+	difficulty      uint64
+	totalDifficulty uint64
 
 	db   *polarysdb.Database
 	lock sync.RWMutex
@@ -33,12 +36,14 @@ type Blockchain struct {
 
 func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *params.ChainParams, engine consensus.Engine, genesis *GenesisBlock) (*Blockchain, error) {
 	bc := &Blockchain{
-		chainID:     chainParams.ChainID,
-		epoch:       chainParams.PowEngine.Epoch,
-		delay:       chainParams.PowEngine.Delay,
-		chainConfig: config,
-		db:          db,
-		localBlocks: make([]*block.Block, 0),
+		chainID:         chainParams.ChainID,
+		epoch:           chainParams.PowEngine.Epoch,
+		delay:           chainParams.PowEngine.Delay,
+		chainConfig:     config,
+		db:              db,
+		localBlocks:     make([]*block.Block, 0),
+		difficulty:      chainParams.PowEngine.Difficulty,
+		totalDifficulty: 0,
 	}
 
 	if !hasGenesisBlock(db) {
@@ -76,8 +81,9 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	}
 
 	bc.latestBlock = latestBlock
+	bc.totalDifficulty += latestBlock.Difficulty()
 
-	consensusProof, err := engine.ConsensusProof(bc.chainID, latestBlock.Height())
+	consensusProof, err := engine.ConsensusProof(latestBlock.Height())
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +101,14 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	return bc, nil
 }
 
+func (bc *Blockchain) Difficulty() uint64 {
+	return bc.difficulty
+}
+
+func (bc *Blockchain) GetTransactions() []transaction.Transaction {
+	return bc.txPool.GetTransactions()
+}
+
 func (bc *Blockchain) ChainID() uint64 {
 	return bc.chainID
 }
@@ -105,6 +119,21 @@ func (bc *Blockchain) ConsensusProof() []byte {
 
 func (bc *Blockchain) GetChainID() uint64 {
 	return bc.chainID
+}
+
+func (bc *Blockchain) AddBlock(blk *block.Block) error {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	for _, b := range bc.localBlocks {
+		if b.Height() == blk.Height() || b.Hash() == blk.Hash() {
+			return ErrBlockExists
+		}
+	}
+
+	bc.localBlocks = append(bc.localBlocks, blk)
+
+	return nil
 }
 
 func (bc *Blockchain) GetBlockByHash(hash common.Hash) (*block.Block, error) {
@@ -227,6 +256,10 @@ func getTransactionsByBlockNumber(db *polarysdb.Database, height uint64) ([]tran
 	}
 
 	return txs, nil
+}
+
+func (bc *Blockchain) GasTarget() uint64 {
+	return bc.gasTarget
 }
 
 func saveBlock(db *polarysdb.Database, blk *block.Block) error {

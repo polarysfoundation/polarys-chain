@@ -112,7 +112,7 @@ func (pb *BlockPool) SyncBlockPool(latestBlock uint64) error {
 
 	pb.latestBlock = latestBlock
 
-	consensusProof, err := pb.engine.ConsensusProof(pb.chainID, latestBlock)
+	consensusProof, err := pb.engine.ConsensusProof(latestBlock)
 	if err != nil {
 		return err
 	}

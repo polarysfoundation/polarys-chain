@@ -10,8 +10,8 @@ var (
 )
 
 type Engine interface {
-	ConsensusProof(chainID uint64, crrBlockNumber uint64) ([]byte, error)
-	ValidatorProof(block *block.Block) ([]byte, error)
+	ConsensusProof(crrBlockNumber uint64) ([]byte, error)
+	ValidatorProof() ([]byte, error)
 	ValidatorExists(validator common.Address) bool
 	VerifyBlock(block *block.Block) bool
 	DifficultyValidator(block *block.Block) bool
@@ -19,6 +19,7 @@ type Engine interface {
 	AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64
 	SelectValidator() common.Address
 	Validator() common.Address
+	VerifyChain(chain Chain) (bool, error)
 }
 
 type Chain interface {

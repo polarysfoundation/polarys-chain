@@ -17,14 +17,13 @@ type Transaction struct {
 	sealHash common.Hash
 }
 
-func NewTransaction(from common.Address, to common.Address, value *big.Int, data []byte, nonce uint64, gasTip uint64, gasPrice uint64, version Version, payload []byte) *Transaction {
+func NewTransaction(from common.Address, to common.Address, value *big.Int, data []byte, nonce uint64, gasPrice uint64, version Version, payload []byte) *Transaction {
 	txData := TxData{
 		From:      from,
 		To:        to,
 		Value:     value,
 		Data:      data,
 		Nonce:     nonce,
-		GasTip:    gasTip,
 		GasPrice:  gasPrice,
 		Version:   version,
 		Payload:   payload,
@@ -123,6 +122,14 @@ func (t *Transaction) VerifyTx(pub pec256.PubKey) (bool, error) {
 	s := new(big.Int).SetBytes(t.data.Signature[32:])
 
 	return crypto.Verify(common.BytesToHash(h), r, s, pub)
+}
+
+func (t *Transaction) CalcGas() {
+
+}
+
+func (t *Transaction) Gas() uint64 {
+	return t.data.Gas
 }
 
 func (t *Transaction) SealTx(seal common.Hash) {
