@@ -182,8 +182,6 @@ func (w *Worker) buildHeader(prev *block.Block, nonce, gasUsed, gasTip uint64, v
 		ConsensusProof: consProof,
 	}
 
-	w.log.Info("timestamp", header.Timestamp)
-
 	// 2) Recalculamos la nueva dificultad según el motor de consenso
 	//    para lo cual necesitamos un *block.Block provisional*:
 	dummyBlock := block.NewBlock(header, nil)

@@ -330,19 +330,16 @@ func (bc *Blockchain) processBlocksLoop() {
 					bc.logs.WithError(err).Error("Failed to save new block")
 					continue
 				}
-				
+
 				bc.totalDifficulty += blk.Difficulty()
 				bc.latestBlock = blk
-
-				bc.logs.Println("timestamp", blk.Timestamp())
-				bc.logs.Println("timestamp", latestBlock.Timestamp())
 
 				timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp())
 
 				bc.logs.WithFields(logrus.Fields{
 					"height":           blk.Height(),
 					"total_difficulty": bc.totalDifficulty,
-					"delay":            timeDelta,
+					"delay":            fmt.Sprintf("%.2fs", timeDelta),
 				}).Info("Committed new block")
 			}
 
