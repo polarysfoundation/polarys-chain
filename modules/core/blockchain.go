@@ -8,6 +8,7 @@ import (
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
+	"github.com/polarysfoundation/polarys-chain/modules/core/blockpool"
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/core/txpool"
@@ -29,6 +30,7 @@ type Blockchain struct {
 	gasTarget       uint64
 	difficulty      uint64
 	totalDifficulty uint64
+	blockPool       *blockpool.BlockPool
 
 	db   *polarysdb.Database
 	lock sync.RWMutex
@@ -134,6 +136,51 @@ func (bc *Blockchain) AddBlock(blk *block.Block) error {
 	bc.localBlocks = append(bc.localBlocks, blk)
 
 	return nil
+}
+
+func (bc *Blockchain) ProcessBlocks() error {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	blk, err := bc.blockPool.ProcessProposedBlocks()
+	if err != nil {
+		return err
+	}
+
+	if blk == nil {
+		return nil
+	}
+
+	if blk.Height() > bc.latestBlock.Height() {
+		err = saveBlock(bc.db, blk)
+		if err != nil {
+			return err
+		}
+
+		bc.latestBlock = blk
+		bc.totalDifficulty += blk.Difficulty()
+	}
+
+	var nextBlock *block.Block
+	for _, b := range bc.localBlocks {
+		if b.Height() == blk.Height()+1 {
+			nextBlock = b
+			break
+		}
+	}
+
+	err = bc.blockPool.AddProposedBlock(nextBlock)
+	if err != nil {
+		return err
+	}
+
+	err = bc.blockPool.SyncBlockPool(blk.Height())
+	if err != nil {
+		return err
+	}
+
+	return nil
+
 }
 
 func (bc *Blockchain) GetBlockByHash(hash common.Hash) (*block.Block, error) {
@@ -246,7 +293,7 @@ func getTransactionsByBlockNumber(db *polarysdb.Database, height uint64) ([]tran
 			return nil, err
 		}
 
-		err = tx.Deserialize(b)
+		err = json.Unmarshal(b, &tx)
 		if err != nil {
 			return nil, err
 		}

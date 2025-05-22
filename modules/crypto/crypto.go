@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"log"
 	"math/big"
 
 	pec256 "github.com/polarysfoundation/pec-256"
@@ -17,6 +18,16 @@ func Pm256(b []byte) []byte {
 	h.Sum(buf[:0])
 
 	return buf
+}
+
+func GenerateKey() (pec256.PrivKey, pec256.PubKey) {
+	priv, pub, _, err := c.GenerateKeyPair()
+	if err != nil {
+		log.Printf("error generating keys: %v", err)
+		panic("error creating new keypair")
+	}
+
+	return priv, pub
 }
 
 func CreateAddress(a common.Address, n uint64, h common.Hash) common.Address {
@@ -36,6 +47,10 @@ func Sign(data common.Hash, priv pec256.PrivKey) (*big.Int, *big.Int, error) {
 	return c.Sign(data.Bytes(), priv.BigInt())
 }
 
+func GenerateSharedKey(priv pec256.PrivKey) pec256.SharedKey {
+	return c.SharedKey(priv)
+}
+
 func Verify(data common.Hash, r, s *big.Int, pub pec256.PubKey) (bool, error) {
 	return c.Verify(data[:], r, s, pub.BigInt())
 }
@@ -50,4 +65,8 @@ func GetPubKey(priv pec256.PrivKey) pec256.PubKey {
 	return pub
 }
 
+func PubKeyToAddress(pub pec256.PubKey) common.Address {
+	b := pub.Bytes()
 
+	return common.BytesToAddress(Pm256(b)[len(b)-15:])
+}

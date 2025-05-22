@@ -6,3 +6,5 @@ github.com/polarysfoundation/pm-256 v0.0.0-20250112065549-cb7b6eb92c94 h1:03/yJy
 github.com/polarysfoundation/pm-256 v0.0.0-20250112065549-cb7b6eb92c94/go.mod h1:9/TxgrEcbGlDpNNoKLc5eWGNEI3pRRkPf8y6ZFV/7bg=
 github.com/polarysfoundation/polarys_db v1.0.0 h1:02NMRNoJB85sf0oYRsK0UUBA4ymASJr8QHngeMNfEvU=
 github.com/polarysfoundation/polarys_db v1.0.0/go.mod h1:MhTEOYBpE+BoZB7RJM9mO/ILL+/Mkw9mGxZ0RcMAUpw=
+golang.org/x/crypto v0.38.0 h1:jt+WWG8IZlBnVbomuhg2Mdq0+BBQaHbtqHEFEigjUV8=
+golang.org/x/crypto v0.38.0/go.mod h1:MvrbAqul58NNYPKnOra203SB9vpuZW0e+RRZV+Ggqjw=

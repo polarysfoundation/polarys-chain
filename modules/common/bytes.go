@@ -1,5 +1,7 @@
 package common
 
+import "encoding/json"
+
 var (
 	hextable = "0123456789abcdef"
 )
@@ -115,6 +117,10 @@ func Uint64ToBytes(n uint64) []byte {
 	b[6] = byte(n >> 8)
 	b[7] = byte(n)
 	return b
+}
+
+func Serialize(v ...interface{}) ([]byte, error) {
+	return json.Marshal(v)
 }
 
 func BytesToUint64(b []byte) uint64 {

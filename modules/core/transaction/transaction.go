@@ -35,7 +35,7 @@ func NewTransaction(from common.Address, to common.Address, value *big.Int, data
 	}
 }
 
-func (t *Transaction) Serialize() ([]byte, error) {
+func (t *Transaction) MarshalJSON() ([]byte, error) {
 	temp := struct {
 		TxData   TxData      `json:"tx_data"`
 		Hash     common.Hash `json:"hash"`
@@ -54,7 +54,7 @@ func (t *Transaction) Serialize() ([]byte, error) {
 	return b, nil
 }
 
-func (t *Transaction) Deserialize(data []byte) error {
+func (t *Transaction) UnmarshalJSON(data []byte) error {
 	temp := struct {
 		TxData   TxData      `json:"tx_data"`
 		Hash     common.Hash `json:"hash"`
@@ -79,7 +79,7 @@ func (t *Transaction) Hash() common.Hash {
 		return t.hash
 	}
 
-	data, err := t.data.Serialize()
+	data, err := t.data.marshal()
 	if err != nil {
 		panic(err)
 	}
@@ -90,29 +90,15 @@ func (t *Transaction) Hash() common.Hash {
 	return t.hash
 }
 
-func (t *Transaction) SignTx(priv pec256.PrivKey) error {
-	b, err := t.data.Serialize()
-	if err != nil {
-		return err
-	}
+func (t *Transaction) SignTransaction(signature []byte) *Transaction {
+	auxTx := copyTransaction(t)
+	auxTx.data.Signature = signature
 
-	h := crypto.Pm256(b)
-	r, s, err := crypto.Sign(common.BytesToHash(h), priv)
-	if err != nil {
-		return err
-	}
-
-	signature := make([]byte, 64)
-	copy(signature[:32], r.Bytes())
-	copy(signature[32:], s.Bytes())
-
-	t.data.Signature = signature
-
-	return nil
+	return auxTx
 }
 
 func (t *Transaction) VerifyTx(pub pec256.PubKey) (bool, error) {
-	b, err := t.data.Serialize()
+	b, err := t.data.marshal()
 	if err != nil {
 		return false, err
 	}
@@ -178,4 +164,12 @@ func (t *Transaction) Version() Version {
 
 func (t *Transaction) Payload() []byte {
 	return t.data.Payload
+}
+
+func copyTransaction(tx *Transaction) *Transaction {
+	return &Transaction{
+		data:     tx.data,
+		hash:     tx.hash,
+		sealHash: tx.sealHash,
+	}
 }

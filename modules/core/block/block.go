@@ -60,7 +60,7 @@ func (b *Block) Serialize() ([]byte, error) {
 }
 
 func (b *Block) CalcHash() common.Hash {
-	data, err := b.header.Serialize()
+	data, err := b.header.marshal()
 	if err != nil {
 		panic(err)
 	}
@@ -193,7 +193,7 @@ func (b *Block) Seal(seal common.Hash) {
 }
 
 func (b *Block) SignBlock(priv pec256.PrivKey) error {
-	data, err := b.header.Serialize()
+	data, err := b.header.marshal()
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (b *Block) SignBlock(priv pec256.PrivKey) error {
 }
 
 func (b *Block) VerifyBlock(pub pec256.PubKey) (bool, error) {
-	data, err := b.header.Serialize()
+	data, err := b.header.marshal()
 	if err != nil {
 		return false, err
 	}

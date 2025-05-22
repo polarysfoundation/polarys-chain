@@ -28,7 +28,7 @@ type TxData struct {
 	Timestamp uint64         `json:"timestamp"`
 }
 
-func (t *TxData) Serialize() ([]byte, error) {
+func (t *TxData) marshal() ([]byte, error) {
 	temp := struct {
 		From      common.Address `json:"from"`
 		To        common.Address `json:"to"`

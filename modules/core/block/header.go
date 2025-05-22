@@ -63,7 +63,7 @@ func calcSliceSize(b []byte) uint64 {
 	return uint64(len(b))
 }
 
-func (h *Header) Deserialize(data []byte) error {
+func (h *Header) unmarshal(data []byte) error {
 	temp := struct {
 		Height          uint64         `json:"height"`
 		Prev            common.Hash    `json:"prev"`
@@ -104,7 +104,7 @@ func (h *Header) Deserialize(data []byte) error {
 	return nil
 }
 
-func (h *Header) Serialize() ([]byte, error) {
+func (h *Header) marshal() ([]byte, error) {
 	temp := struct {
 		Height          uint64         `json:"height"`
 		Prev            common.Hash    `json:"prev"`
