@@ -33,13 +33,20 @@ type BlockPool struct {
 	lock sync.RWMutex
 }
 
-func NewBlockPool(engine consensus.Engine, db *polarysdb.Database, latestBlock uint64, config *params.Config, chainID uint64, epoch uint64, slotHash common.Hash) (*BlockPool, error) {
+func NewBlockPool(engine consensus.Engine, db *polarysdb.Database, latestBlock uint64, config *params.Config, chainID uint64, epoch uint64) (*BlockPool, error) {
 	if !db.Exist(metric) {
 		err := db.Create(metric)
 		if err != nil {
 			return nil, err
 		}
 	}
+
+	consensusProof, err := engine.ConsensusProof(latestBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	slotHash := calcSlotHash(consensusProof, engine.Validator(), epoch, latestBlock, common.Hash{})
 
 	poolBlock := &BlockPool{
 		proposedBlocks:  make([]*block.Block, 0),
@@ -51,15 +58,6 @@ func NewBlockPool(engine consensus.Engine, db *polarysdb.Database, latestBlock u
 		chainID:         chainID,
 		epoch:           epoch,
 		slotHash:        slotHash,
-	}
-
-	if latestBlock > 0 {
-		hash, err := getCurrentSlotHash(db)
-		if err != nil {
-			return nil, err
-		}
-
-		poolBlock.slotHash = hash
 	}
 
 	return poolBlock, nil
@@ -81,7 +79,7 @@ func (pb *BlockPool) ProcessProposedBlocks() (*block.Block, error) {
 
 	validBlocks := make([]*block.Block, 0)
 	for _, b := range pb.proposedBlocks {
-		if pb.latestBlock+1 == b.Height() {
+		if pb.latestBlock == b.Height() {
 			if b.Size() < uint64(pb.maxBlockSize) {
 				validBlocks = append(validBlocks, b)
 			}
@@ -91,6 +89,10 @@ func (pb *BlockPool) ProcessProposedBlocks() (*block.Block, error) {
 	sort.Slice(validBlocks, func(i, j int) bool {
 		return validBlocks[i].GasTarget() > validBlocks[j].GasTarget()
 	})
+
+	if len(validBlocks) == 0 {
+		return nil, fmt.Errorf("no valid blocks found")
+	}
 
 	pb.latestBlock = validBlocks[0].Height()
 

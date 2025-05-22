@@ -2,6 +2,7 @@ package pow
 
 import (
 	"errors"
+	"log"
 	"math/big"
 
 	"slices"
@@ -77,8 +78,7 @@ func (c *Consensus) ValidatorProof() ([]byte, error) {
 
 	copy(validatorProof[:8], common.Uint64ToBytes(c.chainID))
 	copy(validatorProof[8:16], common.Uint64ToBytes(c.epoch)) // Fixed offset
-	copy(validatorProof[16:48], c.currentValidator.Bytes())   // Address is 32 bytes
-	copy(validatorProof[48:49], []byte{0x1f})                 // Fixed offset
+	copy(validatorProof[16:31], c.currentValidator.Bytes())   // Address is 32 bytes
 	copy(validatorProof[32:64], c.protocolHash.Bytes())       // Fixed offset
 
 	return validatorProof, nil
@@ -130,8 +130,8 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 		return false, ErrInvalidBlockHash
 	}
 
-	if !c.verifyConsensusProof(block, prevBlock) {
-		return false, ErrInvalidConsensusProof
+	if ok, err := c.verifyConsensusProof(block, prevBlock); err != nil || !ok {
+		return false, err
 	}
 
 	if !c.verifyValidatorProof(block) {
@@ -153,10 +153,6 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 
 	if block.Prev() != latestBlock.Hash() {
 		return false, ErrInvalidBlockHash
-	}
-
-	if block.Height()%c.epoch != 0 {
-		return false, ErrInvalidEpoch
 	}
 
 	tmpBlk, err := chain.GetBlockByHeight(block.Height())
@@ -205,7 +201,7 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 			return false, ErrInvalidDifficulty
 		}
 
-		if !c.DifficultyValidator(currentBlock, prevBlock) {
+		if ok, err := c.DifficultyValidator(currentBlock, prevBlock); err != nil || !ok {
 			return false, ErrInvalidDifficulty
 		}
 	}
@@ -230,14 +226,14 @@ func (c *Consensus) GenerateTarget(block *block.Block) *big.Int {
 	return target
 }
 
-func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) bool {
+func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) (bool, error) {
 	if block == nil || prevBlock == nil {
-		return false
+		return false, ErrNilBlock
 	}
 
 	consensusProof := block.ConsensusProof()
 	if len(consensusProof) != 64 {
-		return false
+		return false, ErrInvalidConsensusProof
 	}
 
 	chainID := common.BytesToUint64(consensusProof[:8])
@@ -246,31 +242,33 @@ func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Bl
 	validatorCount := common.BytesToUint64(consensusProof[24:32])
 	protocolHash := common.BytesToHash(consensusProof[32:])
 
-	if crrBlockNumber != block.Height() {
-		return false
+	log.Println("verifyConsensusProof", "chainID", chainID, "crrBlockNumber", crrBlockNumber, "epoch", epoch, "validatorCount", validatorCount, "protocolHash", protocolHash)
+
+	if crrBlockNumber == prevBlock.Height()+1 {
+		return false, ErrInvalidBlockHeight
 	}
 
 	if chainID != c.chainID {
-		return false
+		return false, ErrInvalidChainID
 	}
 
 	if len(c.validators) != int(validatorCount) {
-		return false
+		return false, ErrInvalidValidatorCount
 	}
 
 	if epoch != c.epoch {
-		return false
+		return false, ErrInvalidEpoch
 	}
 
 	if protocolHash != c.protocolHash {
-		return false
+		return false, ErrInvalidProtocolHash
 	}
 
 	if !c.ValidatorExists(block.Validator()) {
-		return false
+		return false, ErrInvalidValidator
 	}
 
-	return c.DifficultyValidator(block, prevBlock)
+	return true, nil
 }
 
 func (c *Consensus) verifyValidatorProof(block *block.Block) bool {
@@ -285,8 +283,11 @@ func (c *Consensus) verifyValidatorProof(block *block.Block) bool {
 
 	chainID := common.BytesToUint64(validatorProof[:8])
 	epoch := common.BytesToUint64(validatorProof[8:16])
-	validator := common.BytesToAddress(validatorProof[16:48]) // Address is 32 bytes
+	validator := common.BytesToAddress(validatorProof[16:31]) // Address is 32 bytes
 	protocolHash := common.BytesToHash(validatorProof[32:])
+
+	log.Println(validator.String())
+	log.Println(block.Validator().String())
 
 	if chainID != c.chainID {
 		return false
@@ -332,13 +333,13 @@ func (c *Consensus) AdjustDifficulty(block *block.Block, prevBlock *block.Block)
 	return c.difficulty
 }
 
-func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Block) bool {
+func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Block) (bool, error) {
 	if block == nil || prevBlock == nil {
-		return false
+		return false, ErrNilBlock
 	}
 
 	if block.Height() == 0 {
-		return true
+		return true, nil
 	}
 
 	expectedDifficulty := c.calcDifficulty(block, prevBlock)
@@ -349,7 +350,7 @@ func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Blo
 	minDiff := uint64(float64(expectedDifficulty) * (1 - margin))
 	maxDiff := uint64(float64(expectedDifficulty) * (1 + margin))
 
-	return blockDifficulty >= minDiff && blockDifficulty <= maxDiff
+	return blockDifficulty >= minDiff && blockDifficulty <= maxDiff, nil
 }
 
 func (c *Consensus) SelectValidator() common.Address {

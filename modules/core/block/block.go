@@ -34,7 +34,7 @@ func NewBlock(header Header, transactions []transaction.Transaction) *Block {
 	return blk
 }
 
-func (b *Block) Serialize() ([]byte, error) {
+func (b *Block) MarshalJSON() ([]byte, error) {
 	temp := struct {
 		Header       Header      `json:"header"`
 		Hash         common.Hash `json:"hash"`
@@ -68,7 +68,7 @@ func (b *Block) CalcHash() common.Hash {
 	return b.hash
 }
 
-func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction) error {
+func (b *Block) UnmarshalJSON(data []byte) error {
 	temp := struct {
 		Header       Header      `json:"header"`
 		Hash         common.Hash `json:"hash"`
@@ -87,8 +87,6 @@ func (b *Block) Deserialize(data []byte, transactions []transaction.Transaction)
 	b.sealHash = temp.SealHash
 	b.slotHash = temp.SlotHash
 
-	b.transactions = make([]transaction.Transaction, temp.Transactions)
-	copy(b.transactions, transactions)
 	return nil
 }
 

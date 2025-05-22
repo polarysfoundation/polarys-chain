@@ -47,9 +47,22 @@ func main() {
 		panic(err)
 	}
 
+	engine.SelectValidator()
+
 	worker := miner.NewWorker(m, engine, blockchain, chainParams, logger)
 
-	go worker.Run()
+	go func() {
+		worker.Run()
+	}()
+
+	go func() {
+		blockchain.ProcessLocalBlocks()
+	}()
+
+	go func() {
+		blockchain.ProcessBlocks()
+	}()
 
 	select {}
+
 }

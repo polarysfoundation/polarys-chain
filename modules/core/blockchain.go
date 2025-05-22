@@ -3,8 +3,10 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
@@ -71,6 +73,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 				return nil, err
 			}
 
+			blk.CalcHash()
+
 			bc.logs.WithFields(logrus.Fields{
 				"height": blk.Height(),
 				"hash":   blk.Hash().String(),
@@ -89,6 +93,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 				bc.logs.WithError(err).Error("Failed to convert default genesis to block")
 				return nil, err
 			}
+
+			blk.CalcHash()
 
 			bc.logs.WithFields(logrus.Fields{
 				"height": blk.Height(),
@@ -112,6 +118,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 			return nil, err
 		}
 
+		blk.CalcHash()
+
 		bc.genesis = *blk
 	}
 
@@ -119,6 +127,45 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	if err != nil {
 		bc.logs.WithError(err).Error("Failed to get latest block")
 		return nil, err
+	}
+
+	if latestBlock.Height() == 0 {
+		header := block.Header{
+			Height:          1,
+			Prev:            bc.genesis.Hash(),
+			Nonce:           0,
+			Timestamp:       uint64(time.Now().Unix()),
+			GasTarget:       bc.gasTarget,
+			Difficulty:      bc.difficulty,
+			TotalDifficulty: bc.totalDifficulty,
+			Validator:       common.Address{},
+			ValidatorProof:  []byte{},
+			ConsensusProof:  bc.consensusProof,
+			Data:            []byte{},
+			Signature:       []byte{},
+			GasTip:          0,
+			GasUsed:         0,
+		}
+
+		header.CalculateSize()
+		blk := block.NewBlock(header, nil)
+		blk.CalcHash()
+
+		err = saveBlock(db, blk)
+		if err != nil {
+			bc.logs.WithError(err).Error("Failed to save genesis block")
+			return nil, err
+		}
+
+		latestBlock = blk
+
+		bc.latestBlock = blk
+		bc.totalDifficulty += blk.Difficulty()
+		bc.logs.WithFields(logrus.Fields{
+			"latest_height":    blk.Height(),
+			"latest_hash":      blk.Hash().String(),
+			"total_difficulty": bc.totalDifficulty,
+		}).Info("Genesis block saved")
 	}
 
 	bc.latestBlock = latestBlock
@@ -145,9 +192,18 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		return nil, err
 	}
 
+	blockPool, err := blockpool.NewBlockPool(engine, bc.db, latestBlock.Height(), config, bc.chainID, bc.epoch)
+	if err != nil {
+		bc.logs.WithError(err).Error("Failed to initialize block pool")
+		return nil, err
+	}
+
 	bc.txPool = txPool
 
+	bc.blockPool = blockPool
+
 	bc.logs.WithField("tx_pool_initialized", true).Info("Blockchain initialized successfully")
+	bc.logs.WithField("block_pool_initialized", true).Info("Blockchain initialized successfully")
 
 	return bc, nil
 }
@@ -176,72 +232,115 @@ func (bc *Blockchain) AddBlock(blk *block.Block) error {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
 
-	for _, b := range bc.localBlocks {
-		if b.Height() == blk.Height() || b.Hash() == blk.Hash() {
-			return ErrBlockExists
-		}
-	}
-
 	bc.localBlocks = append(bc.localBlocks, blk)
 
 	return nil
 }
 
-func (bc *Blockchain) ProcessBlocks() error {
+func (bc *Blockchain) ProcessLocalBlocks() {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
 
-	blk, err := bc.blockPool.ProcessProposedBlocks()
-	if err != nil {
-		return err
-	}
+	bc.logs.WithField("local_blocks", len(bc.localBlocks)).Info("Processing local blocks")
 
-	if blk == nil {
-		return nil
-	}
+	go func() {
+		for {
+			var oldBlock *block.Block
+			for _, blk := range bc.localBlocks {
+				if blk.Height() > bc.latestBlock.Height() {
+					bc.logs.WithFields(logrus.Fields{
+						"height": blk.Height(),
+						"hash":   blk.Hash().String(),
+						"txs":    len(blk.Transactions()),
+						"prev":   blk.Prev().String(),
+					}).Info("Proposing local block")
 
-	if blk.Height() > bc.latestBlock.Height() {
-		bc.logs.WithFields(logrus.Fields{
-			"height": blk.Height(),
-			"hash":   blk.Hash().String(),
-			"txs":    len(blk.Transactions()),
-			"prev":   blk.Prev().String(),
-		}).Info("Saving new block")
+					err := bc.blockPool.AddProposedBlock(blk)
+					if err != nil {
+						bc.logs.WithError(err).Error("Failed to add proposed block")
+						continue
+					}
 
-		err = saveBlock(bc.db, blk)
-		if err != nil {
-			return err
+					oldBlock = blk
+				}
+			}
+
+			for i, blk := range bc.localBlocks {
+				if blk.Height() == oldBlock.Height() {
+					bc.localBlocks = slices.Delete(bc.localBlocks, i, i+1)
+					break
+				}
+			}
+
+			time.Sleep(time.Second)
 		}
+	}()
+}
 
-		bc.latestBlock = blk
-		bc.totalDifficulty += blk.Difficulty()
+func (bc *Blockchain) ProcessBlocks() {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
 
-		bc.logs.WithFields(logrus.Fields{
-			"height":           blk.Height(),
-			"hash":             blk.Hash().String(),
-			"total_difficulty": bc.totalDifficulty,
-		}).Info("Committed new block")
-	}
+	go func() {
+		for {
+			blk, err := bc.blockPool.ProcessProposedBlocks()
+			if err != nil {
+				bc.logs.WithError(err).Error("Failed to process proposed blocks")
+				continue
+			}
 
-	var nextBlock *block.Block
-	for _, b := range bc.localBlocks {
-		if b.Height() == blk.Height()+1 {
-			nextBlock = b
-			break
+			if blk == nil {
+				continue
+			}
+
+			if blk.Height() > bc.latestBlock.Height() {
+				bc.logs.WithFields(logrus.Fields{
+					"height": blk.Height(),
+					"hash":   blk.Hash().String(),
+					"txs":    len(blk.Transactions()),
+					"prev":   blk.Prev().String(),
+				}).Info("Saving new block")
+
+				err = saveBlock(bc.db, blk)
+				if err != nil {
+					bc.logs.WithError(err).Error("Failed to save new block")
+					continue
+				}
+
+				bc.latestBlock = blk
+				bc.totalDifficulty += blk.Difficulty()
+
+				bc.logs.WithFields(logrus.Fields{
+					"height":           blk.Height(),
+					"hash":             blk.Hash().String(),
+					"total_difficulty": bc.totalDifficulty,
+				}).Info("Committed new block")
+			}
+
+			var nextBlock *block.Block
+			for _, b := range bc.localBlocks {
+				if b.Height() == blk.Height()+1 {
+					nextBlock = b
+					break
+				}
+			}
+
+			err = bc.blockPool.AddProposedBlock(nextBlock)
+			if err != nil {
+				bc.logs.WithError(err).Error("Failed to add proposed block")
+				continue
+			}
+
+			err = bc.blockPool.SyncBlockPool(blk.Height())
+			if err != nil {
+				bc.logs.WithError(err).Error("Failed to sync block pool")
+				continue
+			}
+
+			time.Sleep(time.Second)
+			bc.logs.WithField("block_pool_synced", true).Info("Block pool synced")
 		}
-	}
-
-	err = bc.blockPool.AddProposedBlock(nextBlock)
-	if err != nil {
-		return err
-	}
-
-	err = bc.blockPool.SyncBlockPool(blk.Height())
-	if err != nil {
-		return err
-	}
-
-	return nil
+	}()
 }
 
 func (bc *Blockchain) GetBlockByHash(hash common.Hash) (*block.Block, error) {
@@ -273,7 +372,7 @@ func (bc *Blockchain) GetLatestBlock() (*block.Block, error) {
 }
 
 func getLatestBlock(db *polarysdb.Database) (*block.Block, error) {
-	data, ok := db.Read(metricCurrent, "0")
+	data, ok := db.Read(metricCurrent, "latest_block")
 	if !ok {
 		return nil, ErrBlockNotFound
 	}
@@ -285,7 +384,7 @@ func getLatestBlock(db *polarysdb.Database) (*block.Block, error) {
 		return nil, err
 	}
 
-	err = blk.Deserialize(b, nil)
+	err = json.Unmarshal(b, &blk)
 	if err != nil {
 		return nil, err
 	}
@@ -330,9 +429,13 @@ func getBlockByHashAndHeight(db *polarysdb.Database, hash common.Hash, height ui
 		return nil, err
 	}
 
-	err = blk.Deserialize(b, txs)
+	err = json.Unmarshal(b, &blk)
 	if err != nil {
 		return nil, err
+	}
+
+	for _, tx := range txs {
+		blk.AddTransaction(tx)
 	}
 
 	return &blk, nil
@@ -387,7 +490,7 @@ func saveBlock(db *polarysdb.Database, blk *block.Block) error {
 		return err
 	}
 
-	err = db.Write(metricCurrent, strconv.FormatUint(blk.Height(), 10), blk)
+	err = db.Write(metricCurrent, "latest_block", blk)
 	if err != nil {
 		return err
 	}

@@ -84,6 +84,8 @@ func (w *Worker) tryProduceBlock() {
 		return
 	}
 
+	w.log.Info(latest.Height())
+
 	consensusProof, err := w.engine.ConsensusProof(latest.Height())
 	if err != nil {
 		w.log.Error("Consensus proof error", "err", err)
@@ -92,6 +94,8 @@ func (w *Worker) tryProduceBlock() {
 
 	header := w.buildHeader(latest, nonce, gasUsed, gasTip, validatorProof, consensusProof)
 	newBlock := block.NewBlock(header, selectedTxs)
+
+	newBlock.CalcHash()
 
 	newBlock, err = w.miner.SignBlock(newBlock, w.config.ChainID)
 	if err != nil {
@@ -111,7 +115,7 @@ func (w *Worker) tryProduceBlock() {
 	}
 
 	if err := w.blockchain.AddBlock(newBlock); err != nil {
-		w.log.Error("Failed to add block to blockchain", "err", err)
+		w.log.Error("Failed to add block to blockchain ", "err: ", err)
 		return
 	}
 

@@ -14,7 +14,7 @@ type Engine interface {
 	ValidatorProof() ([]byte, error)
 	ValidatorExists(validator common.Address) bool
 	VerifyBlock(chain Chain, block *block.Block) (bool, error)
-	DifficultyValidator(block *block.Block, prevBlock *block.Block) bool
+	DifficultyValidator(block *block.Block, prevBlock *block.Block) (bool, error)
 	SealBlock(block *block.Block) (*block.Block, error)
 	AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64
 	SelectValidator() common.Address
