@@ -1,12 +1,10 @@
 package common
 
-import "math/big"
+import (
+	"math/big"
+)
 
 const AddrLen = 15
-
-var (
-	AddressByte = 0x01
-)
 
 type Address [AddrLen]byte
 
@@ -14,7 +12,6 @@ func (a *Address) SetBytes(b []byte) {
 	if len(b) > len(a) {
 		b = b[len(b)-AddrLen:]
 	}
-
 	copy(a[AddrLen-len(b):], b)
 }
 
@@ -65,15 +62,12 @@ func CXIDToAddress(s string) Address {
 		s = s[3:]
 	}
 	b := decode(s)
-	return BytesToAddress(b)
+
+	return BytesToAddress(b[:])
 }
 
 func StringToAddress(s string) Address {
-	if has1cxPrefix(s) {
-		s = s[3:]
-	}
-
-	return BytesToAddress([]byte(s))
+	return CXIDToAddress(s)
 }
 
 func (a Address) hex() []byte {
@@ -84,9 +78,8 @@ func (a Address) hex() []byte {
 }
 
 func (a Address) cxid() []byte {
-	buf := make([]byte, len(a)*3+2)
+	buf := make([]byte, len(a)*2+3)
 	copy(buf[:3], []byte("1cx"))
-	copy(buf[3:5], []byte{byte(AddressByte)})
-	encode(buf[5:], a[:])
+	encode(buf[3:], a[:])
 	return buf
 }

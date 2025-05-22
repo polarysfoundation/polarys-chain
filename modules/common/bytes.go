@@ -1,9 +1,8 @@
 package common
 
-import "encoding/json"
-
-var (
-	hextable = "0123456789abcdef"
+import (
+	"encoding/hex"
+	"encoding/json"
 )
 
 func has0xPrefix(s string) bool {
@@ -62,48 +61,20 @@ func hexEncoder(data []byte) []byte {
 }
 
 func cxidEncoder(data []byte) []byte {
-	// Create a buffer with enough space for "0x" and the hexadecimal representation of the data
-	buf := make([]byte, len(data)*3+2)
+	buf := make([]byte, (len(data)+1)*2+3) // +1 byteType, *2 hex, +3 "1cx"
 	copy(buf[:3], []byte("1cx"))
-	// Encode the data into hexadecimal and write it to the buffer starting at index 2
-	encode(buf[3:], data)
-
+	encode(buf[4:], data) // codifica AddressByte + data
 	return buf
 }
 
-func encode(dst, src []byte) int {
-	j := 0
-	for _, v := range src {
-		dst[j] = hextable[v>>4]
-		dst[j+1] = hextable[v&0x0f]
-		j += 2
-	}
-	return len(src) * 2
+func encode(dst []byte, src []byte) []byte {
+	hex.Encode(dst, src)
+	return dst
 }
 
 func decode(s string) []byte {
-	// Create a byte slice to hold the decoded bytes
-	b := make([]byte, len(s)/2)
-
-	// Decode the hex string into bytes
-	for i := 0; i < len(s); i += 2 {
-		b[i/2] = (hexToByte(s[i]) << 4) | hexToByte(s[i+1])
-	}
-
+	b, _ := hex.DecodeString(s)
 	return b
-}
-
-func hexToByte(b byte) byte {
-	switch {
-	case b >= '0' && b <= '9':
-		return b - '0'
-	case b >= 'a' && b <= 'f':
-		return b - 'a' + 10
-	case b >= 'A' && b <= 'F':
-		return b - 'A' + 10
-	default:
-		return 0
-	}
 }
 
 func Uint64ToBytes(n uint64) []byte {

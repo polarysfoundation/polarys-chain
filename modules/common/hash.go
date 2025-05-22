@@ -4,10 +4,6 @@ import "math/big"
 
 const HashLen = 32
 
-var (
-	HashByte = 0x1f
-)
-
 type Hash [HashLen]byte
 
 func (h *Hash) SetBytes(buf []byte) {
@@ -96,7 +92,6 @@ func (h Hash) hex() []byte {
 func (h Hash) cxid() []byte {
 	buf := make([]byte, len(h)*3+2)
 	copy(buf[:3], []byte("1cx"))
-	copy(buf[3:5], []byte{byte(HashByte)})
-	encode(buf[5:], h[:])
+	encode(buf[3:], h[:])
 	return buf
 }

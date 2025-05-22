@@ -13,8 +13,8 @@ type Engine interface {
 	ConsensusProof(crrBlockNumber uint64) ([]byte, error)
 	ValidatorProof() ([]byte, error)
 	ValidatorExists(validator common.Address) bool
-	VerifyBlock(block *block.Block) bool
-	DifficultyValidator(block *block.Block) bool
+	VerifyBlock(chain Chain, block *block.Block) (bool, error)
+	DifficultyValidator(block *block.Block, prevBlock *block.Block) bool
 	SealBlock(block *block.Block) (*block.Block, error)
 	AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64
 	SelectValidator() common.Address

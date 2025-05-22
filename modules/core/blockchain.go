@@ -14,6 +14,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/txpool"
 	"github.com/polarysfoundation/polarys-chain/modules/params"
 	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/sirupsen/logrus"
 )
 
 type Blockchain struct {
@@ -32,11 +33,16 @@ type Blockchain struct {
 	totalDifficulty uint64
 	blockPool       *blockpool.BlockPool
 
+	logs *logrus.Logger
 	db   *polarysdb.Database
 	lock sync.RWMutex
 }
 
-func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *params.ChainParams, engine consensus.Engine, genesis *GenesisBlock) (*Blockchain, error) {
+func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *params.ChainParams, engine consensus.Engine, genesis *GenesisBlock, logs *logrus.Logger) (*Blockchain, error) {
+	logs.WithFields(logrus.Fields{
+		"chain_id": chainParams.ChainID,
+	}).Info("Initializing blockchain")
+
 	bc := &Blockchain{
 		chainID:         chainParams.ChainID,
 		epoch:           chainParams.PowEngine.Epoch,
@@ -46,47 +52,87 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		localBlocks:     make([]*block.Block, 0),
 		difficulty:      chainParams.PowEngine.Difficulty,
 		totalDifficulty: 0,
+		logs:            logs,
 	}
 
 	if !hasGenesisBlock(db) {
+		bc.logs.Info("Genesis block not found, initializing genesis")
+
 		if genesis != nil {
-			gb, err := InitGenesisBlock(db, false, genesis)
+			gb, err := InitGenesisBlock(db, false, genesis, bc.consensusProof)
 			if err != nil {
+				bc.logs.WithError(err).Error("Failed to initialize provided genesis block")
 				return nil, err
 			}
 
 			blk, err := gb.ToBlock()
 			if err != nil {
+				bc.logs.WithError(err).Error("Failed to convert genesis to block")
 				return nil, err
 			}
+
+			bc.logs.WithFields(logrus.Fields{
+				"height": blk.Height(),
+				"hash":   blk.Hash().String(),
+			}).Info("Initializing genesis block")
 
 			bc.genesis = *blk
 		} else {
-			gb, err := InitGenesisBlock(db, true, nil)
+			gb, err := InitGenesisBlock(db, true, nil, bc.consensusProof)
 			if err != nil {
+				bc.logs.WithError(err).Error("Failed to create default genesis block")
 				return nil, err
 			}
 
 			blk, err := gb.ToBlock()
 			if err != nil {
+				bc.logs.WithError(err).Error("Failed to convert default genesis to block")
 				return nil, err
 			}
+
+			bc.logs.WithFields(logrus.Fields{
+				"height": blk.Height(),
+				"hash":   blk.Hash().String(),
+			}).Info("Initializing genesis block")
 
 			bc.genesis = *blk
 		}
 
+		bc.logs.WithField("genesis_height", bc.genesis.Height()).Info("Genesis block initialized")
+	} else {
+		gb, err := getGenesisBlock(bc.db)
+		if err != nil {
+			bc.logs.WithError(err).Error("Failed to get genesis block")
+			return nil, err
+		}
+
+		blk, err := gb.ToBlock()
+		if err != nil {
+			bc.logs.WithError(err).Error("Failed to get genesis block")
+			return nil, err
+		}
+
+		bc.genesis = *blk
 	}
 
 	latestBlock, err := bc.GetLatestBlock()
 	if err != nil {
+		bc.logs.WithError(err).Error("Failed to get latest block")
 		return nil, err
 	}
 
 	bc.latestBlock = latestBlock
 	bc.totalDifficulty += latestBlock.Difficulty()
 
+	bc.logs.WithFields(logrus.Fields{
+		"latest_height":    latestBlock.Height(),
+		"latest_hash":      latestBlock.Hash().String(),
+		"total_difficulty": bc.totalDifficulty,
+	}).Info("Loaded latest block")
+
 	consensusProof, err := engine.ConsensusProof(latestBlock.Height())
 	if err != nil {
+		bc.logs.WithError(err).Error("Failed to generate consensus proof")
 		return nil, err
 	}
 
@@ -95,10 +141,13 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 
 	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof)
 	if err != nil {
+		bc.logs.WithError(err).Error("Failed to initialize transaction pool")
 		return nil, err
 	}
 
 	bc.txPool = txPool
+
+	bc.logs.WithField("tx_pool_initialized", true).Info("Blockchain initialized successfully")
 
 	return bc, nil
 }
@@ -152,6 +201,13 @@ func (bc *Blockchain) ProcessBlocks() error {
 	}
 
 	if blk.Height() > bc.latestBlock.Height() {
+		bc.logs.WithFields(logrus.Fields{
+			"height": blk.Height(),
+			"hash":   blk.Hash().String(),
+			"txs":    len(blk.Transactions()),
+			"prev":   blk.Prev().String(),
+		}).Info("Saving new block")
+
 		err = saveBlock(bc.db, blk)
 		if err != nil {
 			return err
@@ -159,6 +215,12 @@ func (bc *Blockchain) ProcessBlocks() error {
 
 		bc.latestBlock = blk
 		bc.totalDifficulty += blk.Difficulty()
+
+		bc.logs.WithFields(logrus.Fields{
+			"height":           blk.Height(),
+			"hash":             blk.Hash().String(),
+			"total_difficulty": bc.totalDifficulty,
+		}).Info("Committed new block")
 	}
 
 	var nextBlock *block.Block
@@ -180,7 +242,6 @@ func (bc *Blockchain) ProcessBlocks() error {
 	}
 
 	return nil
-
 }
 
 func (bc *Blockchain) GetBlockByHash(hash common.Hash) (*block.Block, error) {
@@ -242,9 +303,9 @@ func getLatestBlock(db *polarysdb.Database) (*block.Block, error) {
 }
 
 func getBlockByHashAndHeight(db *polarysdb.Database, hash common.Hash, height uint64) (*block.Block, error) {
-
 	var data any
 	var ok bool
+
 	if !hash.IsValid() {
 		data, ok = db.Read(metricByNumber, strconv.FormatUint(height, 10))
 		if !ok {
@@ -278,6 +339,13 @@ func getBlockByHashAndHeight(db *polarysdb.Database, hash common.Hash, height ui
 }
 
 func getTransactionsByBlockNumber(db *polarysdb.Database, height uint64) ([]transaction.Transaction, error) {
+	if !db.Exist(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10))) {
+		err := db.Create(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10)))
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	data, err := db.ReadBatch(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10)))
 	if err != nil {
 		return nil, err
@@ -299,7 +367,6 @@ func getTransactionsByBlockNumber(db *polarysdb.Database, height uint64) ([]tran
 		}
 
 		txs = append(txs, tx)
-
 	}
 
 	return txs, nil
@@ -340,5 +407,4 @@ func saveBlock(db *polarysdb.Database, blk *block.Block) error {
 	}
 
 	return nil
-
 }

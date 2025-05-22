@@ -4,10 +4,6 @@ import "math/big"
 
 const KeyLen = 16
 
-var (
-	KeyByte = 0xf8
-)
-
 type Key [KeyLen]byte
 
 func (k *Key) SetBytes(b []byte) {
@@ -79,7 +75,6 @@ func (k Key) hex() []byte {
 func (k Key) cxid() []byte {
 	buf := make([]byte, len(k)*3+2)
 	copy(buf[:3], []byte("1cx"))
-	copy(buf[3:5], []byte{byte(KeyByte)})
-	encode(buf[5:], k[:])
+	encode(buf[3:], k[:])
 	return buf
 }

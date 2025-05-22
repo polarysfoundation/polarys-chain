@@ -1,13 +1,15 @@
 package pow
 
 import (
+	"errors"
 	"math/big"
+
+	"slices"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
-	"slices"
 )
 
 var (
@@ -35,7 +37,7 @@ type Consensus struct {
 	lastDifficulty   uint64
 }
 
-func InitConsensus(epoch, difficulty, delay, chainID uint64) *Consensus {
+func InitConsensus(epoch, difficulty, delay, chainID uint64, validators []common.Address) *Consensus {
 	buff := common.Decode("PowEngine")
 	protocolHash := crypto.Pm256(buff)
 
@@ -43,7 +45,7 @@ func InitConsensus(epoch, difficulty, delay, chainID uint64) *Consensus {
 		epoch:        epoch,
 		difficulty:   difficulty,
 		delay:        delay,
-		validators:   make([]common.Address, 0),
+		validators:   validators,
 		protocolHash: common.BytesToHash(protocolHash),
 		chainID:      chainID,
 	}
@@ -54,11 +56,16 @@ func (c *Consensus) Validator() common.Address {
 }
 
 func (c *Consensus) ConsensusProof(crrBlockNumber uint64) ([]byte, error) {
+	if crrBlockNumber == 0 {
+		return nil, errors.New("invalid block number")
+	}
+
 	consensusProof := make([]byte, 64)
 	buff := make([]byte, 32)
-	copy(buff[8:], common.Uint64ToBytes(crrBlockNumber))
-	copy(buff[:8], common.Uint64ToBytes(c.chainID))
-	copy(buff[16:], common.Uint64ToBytes(uint64(len(c.validators))))
+	copy(buff[:8], common.Uint64ToBytes(c.chainID)) // Fixed copy direction
+	copy(buff[8:16], common.Uint64ToBytes(crrBlockNumber))
+	copy(buff[16:24], common.Uint64ToBytes(c.epoch))
+	copy(buff[24:32], common.Uint64ToBytes(uint64(len(c.validators))))
 	copy(consensusProof[:32], buff)
 	copy(consensusProof[32:], c.protocolHash.Bytes())
 
@@ -69,15 +76,19 @@ func (c *Consensus) ValidatorProof() ([]byte, error) {
 	validatorProof := make([]byte, 64)
 
 	copy(validatorProof[:8], common.Uint64ToBytes(c.chainID))
-	copy(validatorProof[:8], common.Uint64ToBytes(c.epoch))
-	copy(validatorProof[16:], c.currentValidator.Bytes())
-	copy(validatorProof[1:], []byte{0x1f})
-	copy(validatorProof[32:], c.protocolHash.Bytes())
+	copy(validatorProof[8:16], common.Uint64ToBytes(c.epoch)) // Fixed offset
+	copy(validatorProof[16:48], c.currentValidator.Bytes())   // Address is 32 bytes
+	copy(validatorProof[48:49], []byte{0x1f})                 // Fixed offset
+	copy(validatorProof[32:64], c.protocolHash.Bytes())       // Fixed offset
 
 	return validatorProof, nil
 }
 
 func (c *Consensus) SealBlock(block *block.Block) (*block.Block, error) {
+	if block == nil {
+		return nil, ErrNilBlock
+	}
+
 	consensusProof, err := c.ConsensusProof(block.Height())
 	if err != nil {
 		return nil, err
@@ -102,9 +113,17 @@ func (c *Consensus) SealBlock(block *block.Block) (*block.Block, error) {
 }
 
 func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool, error) {
+	if block == nil {
+		return false, ErrNilBlock
+	}
+
 	prevBlock, err := chain.GetBlockByHeight(block.Height() - 1)
 	if err != nil {
 		return false, err
+	}
+
+	if prevBlock == nil {
+		return false, ErrNilPreviousBlock
 	}
 
 	if prevBlock.Hash() != block.Prev() {
@@ -141,11 +160,7 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 	}
 
 	tmpBlk, err := chain.GetBlockByHeight(block.Height())
-	if err != nil {
-		return false, err
-	}
-
-	if tmpBlk.Height() == block.Height() {
+	if err == nil && tmpBlk != nil {
 		return false, ErrDuplicatedBlock
 	}
 
@@ -166,13 +181,13 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 		return true, nil
 	}
 
-	for i := uint64(0); i < latestBlock.Height(); i++ {
+	for i := uint64(1); i <= latestBlock.Height(); i++ { // Start from 1 to avoid underflow
 		currentBlock, err := chain.GetBlockByHeight(i)
 		if err != nil {
 			return false, err
 		}
 
-		prevBlock, err := chain.GetBlockByHeight(currentBlock.Height() - 1)
+		prevBlock, err := chain.GetBlockByHeight(i - 1)
 		if err != nil {
 			return false, err
 		}
@@ -189,34 +204,48 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 		if currentBlock.Difficulty() > target.Uint64() {
 			return false, ErrInvalidDifficulty
 		}
+
+		if !c.DifficultyValidator(currentBlock, prevBlock) {
+			return false, ErrInvalidDifficulty
+		}
 	}
 
 	return true, nil
 }
 
 func (c *Consensus) GenerateTarget(block *block.Block) *big.Int {
+	if block == nil {
+		return new(big.Int).SetUint64(MinDifficulty)
+	}
+
 	target := new(big.Int).SetUint64(c.difficulty)
 	if block.Height() == 0 {
 		return target
 	}
 
 	if block.Height()%c.epoch == 0 {
-		target = new(big.Int).Mul(target, big.NewInt(int64(DifficultyDivisor)))
+		target = new(big.Int).Div(target, big.NewInt(int64(DifficultyDivisor)))
 	}
 
 	return target
 }
 
 func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) bool {
+	if block == nil || prevBlock == nil {
+		return false
+	}
+
 	consensusProof := block.ConsensusProof()
 	if len(consensusProof) != 64 {
 		return false
 	}
+
 	chainID := common.BytesToUint64(consensusProof[:8])
 	crrBlockNumber := common.BytesToUint64(consensusProof[8:16])
 	epoch := common.BytesToUint64(consensusProof[16:24])
 	validatorCount := common.BytesToUint64(consensusProof[24:32])
 	protocolHash := common.BytesToHash(consensusProof[32:])
+
 	if crrBlockNumber != block.Height() {
 		return false
 	}
@@ -241,23 +270,24 @@ func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Bl
 		return false
 	}
 
-	if !c.DifficultyValidator(block, prevBlock) {
-		return false
-	}
-
-	return true
-
+	return c.DifficultyValidator(block, prevBlock)
 }
 
 func (c *Consensus) verifyValidatorProof(block *block.Block) bool {
+	if block == nil {
+		return false
+	}
+
 	validatorProof := block.ValidatorProof()
 	if len(validatorProof) != 64 {
 		return false
 	}
+
 	chainID := common.BytesToUint64(validatorProof[:8])
 	epoch := common.BytesToUint64(validatorProof[8:16])
-	validator := common.BytesToAddress(validatorProof[16:32])
+	validator := common.BytesToAddress(validatorProof[16:48]) // Address is 32 bytes
 	protocolHash := common.BytesToHash(validatorProof[32:])
+
 	if chainID != c.chainID {
 		return false
 	}
@@ -270,11 +300,7 @@ func (c *Consensus) verifyValidatorProof(block *block.Block) bool {
 		return false
 	}
 
-	if validator != block.Validator() {
-		return false
-	}
-
-	return true
+	return validator == block.Validator()
 }
 
 func (c *Consensus) ValidatorExists(address common.Address) bool {
@@ -282,6 +308,10 @@ func (c *Consensus) ValidatorExists(address common.Address) bool {
 }
 
 func (c *Consensus) AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64 {
+	if block == nil || prevBlock == nil {
+		return c.difficulty
+	}
+
 	if block.Height()%c.epoch != 0 {
 		return c.difficulty
 	}
@@ -298,87 +328,103 @@ func (c *Consensus) AdjustDifficulty(block *block.Block, prevBlock *block.Block)
 		c.lastDifficulty = newDifficulty
 	}
 
-	if c.difficulty < MinDifficulty {
-		c.difficulty = MinDifficulty
-	} else if c.difficulty > MaxDifficulty {
-		c.difficulty = MaxDifficulty
-	}
-
+	c.difficulty = max(min(newDifficulty, MaxDifficulty), MinDifficulty)
 	return c.difficulty
 }
 
-// DifficultyValidator checks if the block's difficulty is valid based on expected difficulty.
-// It compares the block's difficulty with the calculated difficulty using previous block data.
 func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Block) bool {
-	// Genesis block: always valid
-	if block.Height() == 0 {
-		return true
+	if block == nil || prevBlock == nil {
+		return false
 	}
 
-	// Get previous block (must be implemented in your chain)
-	if prevBlock == nil {
-		return false
+	if block.Height() == 0 {
+		return true
 	}
 
 	expectedDifficulty := c.calcDifficulty(block, prevBlock)
 	blockDifficulty := block.Difficulty()
 
-	// Allow a small margin for difficulty drift (optional)
-	const margin = 0 // set to 0 for strict equality, or small value for tolerance
+	// Allow a small margin for difficulty drift
+	const margin = 0.1
+	minDiff := uint64(float64(expectedDifficulty) * (1 - margin))
+	maxDiff := uint64(float64(expectedDifficulty) * (1 + margin))
 
-	if blockDifficulty < expectedDifficulty-margin || blockDifficulty > expectedDifficulty+margin {
-		return false
-	}
-	return true
+	return blockDifficulty >= minDiff && blockDifficulty <= maxDiff
 }
 
-// This function work just with a single validator for PoW protocol
 func (c *Consensus) SelectValidator() common.Address {
-	nextVal := c.validators[0]
+	if len(c.validators) == 0 {
+		return common.Address{}
+	}
 
+	nextVal := c.validators[0]
 	c.currentValidator = nextVal
 	c.latestValidator = nextVal
 	return nextVal
 }
 
-// calcDifficulty calculates the next block difficulty based on recent block data.
-// It uses gas usage, block time, and previous difficulty to adjust the difficulty dynamically.
 func (c *Consensus) calcDifficulty(block *block.Block, prevBlock *block.Block) uint64 {
-	// Get previous difficulty
+	if block == nil || prevBlock == nil {
+		return c.difficulty
+	}
+
 	prevDifficulty := c.difficulty
 	if block.Height() == 0 {
 		return prevDifficulty
 	}
 
-	// Get gas usage ratio (target/used)
 	gasUsed := block.GasUsed()
 	gasTarget := block.GasTarget()
 	var gasRatio float64
 	if gasUsed == 0 {
-		gasRatio = 1.0 // Avoid division by zero, treat as optimal
+		gasRatio = 1.0
 	} else {
 		gasRatio = float64(gasTarget) / float64(gasUsed)
 	}
 
-	// Get block time delta (current - previous)
 	blockTime := block.Timestamp()
 	prevBlockTime := prevBlock.Timestamp()
 	timeDelta := blockTime - prevBlockTime
 	if timeDelta == 0 {
-		timeDelta = 1 // Avoid division by zero
+		timeDelta = 1
 	}
 
-	// Calculate adjustment factor based on gas usage and block time
-	// If blocks are too fast or gas is overused, increase difficulty
-	// If blocks are too slow or gas is underused, decrease difficulty
-	targetBlockTime := c.delay
-	timeFactor := float64(targetBlockTime) / float64(timeDelta)
+	targetBlockTime := float64(c.delay)
+	timeFactor := targetBlockTime / float64(timeDelta)
 
-	// Weighted adjustment: 70% block time, 30% gas usage
-	adjustment := max(min(0.7*timeFactor+0.3*gasRatio, 1.2), 0.8)
+	// Calculate adjustment factor
+	adjustment := 0.7*timeFactor + 0.3*gasRatio
+
+	// Apply bounds to adjustment
+	if adjustment > 1.2 {
+		adjustment = 1.2
+	} else if adjustment < 0.8 {
+		adjustment = 0.8
+	}
 
 	// Calculate new difficulty
-	newDifficulty := min(max(uint64(float64(prevDifficulty)*adjustment), MinDifficulty), MaxDifficulty)
+	newDifficulty := float64(prevDifficulty) * adjustment
 
-	return newDifficulty
+	// Apply bounds to difficulty
+	if newDifficulty > float64(MaxDifficulty) {
+		newDifficulty = float64(MaxDifficulty)
+	} else if newDifficulty < float64(MinDifficulty) {
+		newDifficulty = float64(MinDifficulty)
+	}
+
+	return uint64(newDifficulty)
+}
+
+func max(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
 }

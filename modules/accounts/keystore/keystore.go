@@ -7,20 +7,51 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	pec256 "github.com/polarysfoundation/pec-256"
+	pm256 "github.com/polarysfoundation/pm-256"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/scrypt"
 )
 
 var (
-	keystoreDir = ""
+	keystoreDir = getKeystorePath()
 )
+
+var (
+	logger = logrus.New()
+)
+
+const (
+	basePath     = ".polarys"
+	keystorePath = "keystore"
+)
+
+func getKeystorePath() string {
+	return filepath.Join(getDir(basePath, keystorePath))
+}
+
+func getDir(dir string, subdir string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("failed to get home directory: %v", err)
+	}
+	subDirPath := filepath.Join(homeDir, dir, subdir)
+
+	err = os.MkdirAll(subDirPath, os.ModePerm)
+	if err != nil {
+		log.Fatalf("failed to create %s directory: %v", subdir, err)
+	}
+
+	return subDirPath
+}
 
 type Keystore struct {
 	Address common.Address `json:"address"`
@@ -48,6 +79,10 @@ type Crypto struct {
 func NewKeypair(passphrase []byte) (*Keypair, error) {
 	priv, pub := crypto.GenerateKey()
 
+	logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
+
 	keypair := &Keypair{
 		priv: priv,
 		pub:  pub,
@@ -55,6 +90,7 @@ func NewKeypair(passphrase []byte) (*Keypair, error) {
 
 	err := saveKeystore(*keypair, passphrase)
 	if err != nil {
+		logger.Errorf("error saving keystore: %v", err)
 		return nil, err
 	}
 
@@ -278,7 +314,7 @@ func saveKeystore(keypair Keypair, passphrase []byte) error {
 	keystore.Crypto.KDFParams.N = 1 << 18
 	keystore.Crypto.KDFParams.R = 8
 	keystore.Crypto.KDFParams.P = 1
-	mac := crypto.Pm256([]byte(ciphertext))
+	mac := pm256.Sum256([]byte(ciphertext))
 	keystore.Crypto.MAC = hex.EncodeToString(mac[:])
 
 	data, err := json.MarshalIndent(keystore, "", "  ")

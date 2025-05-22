@@ -2,9 +2,7 @@ package block
 
 import (
 	"encoding/json"
-	"math/big"
 
-	pec256 "github.com/polarysfoundation/pec-256"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
@@ -192,37 +190,22 @@ func (b *Block) Seal(seal common.Hash) {
 	b.sealHash = seal
 }
 
-func (b *Block) SignBlock(priv pec256.PrivKey) error {
-	data, err := b.header.marshal()
-	if err != nil {
-		return err
-	}
+func (b *Block) SignBlock(signature []byte) (*Block, error) {
+	auxBlock := copyBlock(b)
+	auxBlock.header.Signature = signature
 
-	h := crypto.Pm256(data)
-	r, s, err := crypto.Sign(common.BytesToHash(h), priv)
-	if err != nil {
-		return err
-	}
-
-	signature := make([]byte, 64)
-	copy(signature[:32], r.Bytes())
-	copy(signature[32:], s.Bytes())
-
-	b.header.Signature = signature
-
-	return nil
+	return auxBlock, nil
 }
 
-func (b *Block) VerifyBlock(pub pec256.PubKey) (bool, error) {
-	data, err := b.header.marshal()
-	if err != nil {
-		return false, err
+func copyBlock(b *Block) *Block {
+	transactions := make([]transaction.Transaction, len(b.transactions))
+	copy(transactions, b.transactions)
+
+	return &Block{
+		header:       b.header,
+		transactions: transactions,
+		hash:         b.hash,
+		sealHash:     b.sealHash,
+		slotHash:     b.slotHash,
 	}
-
-	h := crypto.Pm256(data)
-
-	r := new(big.Int).SetBytes(b.header.Signature[:32])
-	s := new(big.Int).SetBytes(b.header.Signature[32:])
-
-	return crypto.Verify(common.BytesToHash(h), r, s, pub)
 }

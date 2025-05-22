@@ -2,14 +2,17 @@ package pow
 
 import "errors"
 
+// Define error variables
 var (
+	ErrInvalidBlockHash      = errors.New("invalid block hash")
 	ErrInvalidConsensusProof = errors.New("invalid consensus proof")
 	ErrInvalidValidatorProof = errors.New("invalid validator proof")
 	ErrInvalidValidator      = errors.New("invalid validator")
-	ErrInvalidDifficulty     = errors.New("invalid difficulty")
 	ErrInvalidBlockHeight    = errors.New("invalid block height")
-	ErrInvalidBlockHash      = errors.New("invalid block hash")
 	ErrInvalidEpoch          = errors.New("invalid epoch")
 	ErrDuplicatedBlock       = errors.New("duplicated block")
 	ErrInvalidSealHash       = errors.New("invalid seal hash")
+	ErrInvalidDifficulty     = errors.New("invalid difficulty")
+	ErrNilBlock              = errors.New("block is nil")
+	ErrNilPreviousBlock      = errors.New("previous block is nil")
 )

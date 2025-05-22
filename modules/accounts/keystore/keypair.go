@@ -69,3 +69,17 @@ func (k *Keypair) signTX(tx *transaction.Transaction) (*transaction.Transaction,
 
 	return tx.SignTransaction(signature), nil
 }
+
+func (k *Keypair) sign(data []byte) ([]byte, error) {
+	h := crypto.Pm256(data)
+	signature := make([]byte, 64)
+	r, s, err := crypto.Sign(common.BytesToHash(h), k.priv)
+	if err != nil {
+		return nil, err
+	}
+
+	r.FillBytes(signature[32:])
+	s.FillBytes(signature[:32])
+
+	return signature, nil
+}

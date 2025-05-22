@@ -32,7 +32,7 @@ type GenesisBlock struct {
 	Size            uint64         `json:"size"`
 }
 
-func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBlock) (*GenesisBlock, error) {
+func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBlock, consensusProof []byte) (*GenesisBlock, error) {
 	err := checkMetrics(db)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBloc
 	}
 
 	if dfChain && genesis == nil {
-		gb := defaultBlock()
+		gb := defaultBlock(consensusProof)
 
 		blk, err := gb.ToBlock()
 		if err != nil {
@@ -79,7 +79,7 @@ func (g *GenesisBlock) Hash() common.Hash {
 	return common.BytesToHash(data)
 }
 
-func defaultBlock() *GenesisBlock {
+func defaultBlock(consensusProof []byte) *GenesisBlock {
 	gb := &GenesisBlock{
 		Height:          0,
 		Prev:            zeroHash,
@@ -92,7 +92,7 @@ func defaultBlock() *GenesisBlock {
 		TotalDifficulty: 0,
 		Data:            []byte{},
 		ValidatorProof:  []byte{},
-		ConsensusProof:  []byte{},
+		ConsensusProof:  consensusProof,
 		Validator:       zeroAddress,
 	}
 

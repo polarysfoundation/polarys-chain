@@ -70,7 +70,7 @@ func TestAddress_StringAndCXID(t *testing.T) {
 	var addr Address
 	addr.SetBytes(addrData)
 
-	expectedPrefix := []byte{'1', 'c', 'x', byte(AddressByte), 0x00}
+	expectedPrefix := []byte{'1', 'c', 'x', 0x00}
 	hexData := make([]byte, AddrLen*2)
 	encode(hexData, addrData) // Uses package's encode
 

@@ -74,7 +74,7 @@ func TestHash_StringAndCXID(t *testing.T) {
 
 	// Expected construction based on hash.go's cxid()
 	// "1cx" + byte(HashByte) + 0x00 + hex(hashData) + trailing_nulls
-	expectedPrefixAndByte := []byte{'1', 'c', 'x', byte(HashByte), 0x00} // 5 bytes
+	expectedPrefixAndByte := []byte{'1', 'c', 'x', 0x00} // 5 bytes
 	hexEncodedData := make([]byte, HashLen*2)
 	encode(hexEncodedData, hashData) // common.encode from bytes.go
 
