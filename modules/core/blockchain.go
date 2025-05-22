@@ -320,19 +320,21 @@ func (bc *Blockchain) processBlocksLoop() {
 
 			// sólo guardamos si es la siguiente altura
 			if blk.Height() == bc.latestBlock.Height() {
-				if err := saveBlock(bc.db, blk); err != nil {
-					bc.logs.WithError(err).Error("Failed to save new block")
-					continue
-				}
-				bc.totalDifficulty += blk.Difficulty()
-				bc.latestBlock = blk
-
 				latestBlock, err := getLatestBlock(bc.db)
 				if err != nil {
 					bc.logs.WithError(err).Error("Failed to get latest block")
 					continue
 				}
 
+				if err := saveBlock(bc.db, blk); err != nil {
+					bc.logs.WithError(err).Error("Failed to save new block")
+					continue
+				}
+				
+				bc.totalDifficulty += blk.Difficulty()
+				bc.latestBlock = blk
+
+				bc.logs.Println("timestamp", blk.Timestamp())
 				bc.logs.Println("timestamp", latestBlock.Timestamp())
 
 				timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp())

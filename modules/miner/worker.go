@@ -47,7 +47,7 @@ func (w *Worker) Run() {
 	w.log.Info("Worker started")
 	go func() {
 		defer w.wg.Done()
-		ticker := time.NewTicker(time.Duration(w.config.PowEngine.Delay) * 2 * time.Second)
+		ticker := time.NewTicker(time.Duration(w.config.PowEngine.Delay) * time.Second)
 		defer ticker.Stop()
 
 		for {
