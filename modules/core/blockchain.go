@@ -1,9 +1,9 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -34,6 +34,9 @@ type Blockchain struct {
 	difficulty      uint64
 	totalDifficulty uint64
 	blockPool       *blockpool.BlockPool
+	ctx             context.Context
+	wg              sync.WaitGroup
+	cancel          context.CancelFunc
 
 	logs *logrus.Logger
 	db   *polarysdb.Database
@@ -45,6 +48,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		"chain_id": chainParams.ChainID,
 	}).Info("Initializing blockchain")
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	bc := &Blockchain{
 		chainID:         chainParams.ChainID,
 		epoch:           chainParams.PowEngine.Epoch,
@@ -55,6 +60,9 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		difficulty:      chainParams.PowEngine.Difficulty,
 		totalDifficulty: 0,
 		logs:            logs,
+		gasTarget:       1000000,
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	if !hasGenesisBlock(db) {
@@ -202,6 +210,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 
 	bc.blockPool = blockPool
 
+	bc.blockPool.SyncBlockPool(latestBlock.Height() + 1)
+
 	bc.logs.WithField("tx_pool_initialized", true).Info("Blockchain initialized successfully")
 	bc.logs.WithField("block_pool_initialized", true).Info("Blockchain initialized successfully")
 
@@ -233,114 +243,120 @@ func (bc *Blockchain) AddBlock(blk *block.Block) error {
 	defer bc.lock.Unlock()
 
 	bc.localBlocks = append(bc.localBlocks, blk)
+	bc.latestBlock = blk
 
 	return nil
 }
 
-func (bc *Blockchain) ProcessLocalBlocks() {
-	bc.lock.Lock()
-	defer bc.lock.Unlock()
-
-	bc.logs.WithField("local_blocks", len(bc.localBlocks)).Info("Processing local blocks")
-
-	go func() {
-		for {
-			var oldBlock *block.Block
-			for _, blk := range bc.localBlocks {
-				if blk.Height() > bc.latestBlock.Height() {
-					bc.logs.WithFields(logrus.Fields{
-						"height": blk.Height(),
-						"hash":   blk.Hash().String(),
-						"txs":    len(blk.Transactions()),
-						"prev":   blk.Prev().String(),
-					}).Info("Proposing local block")
-
-					err := bc.blockPool.AddProposedBlock(blk)
-					if err != nil {
-						bc.logs.WithError(err).Error("Failed to add proposed block")
-						continue
-					}
-
-					oldBlock = blk
-				}
-			}
-
-			for i, blk := range bc.localBlocks {
-				if blk.Height() == oldBlock.Height() {
-					bc.localBlocks = slices.Delete(bc.localBlocks, i, i+1)
-					break
-				}
-			}
-
-			time.Sleep(time.Second)
-		}
-	}()
+// 1. Añadimos un método Start() que arranca ambos bucles de procesamiento
+func (bc *Blockchain) Start() {
+	// arrancamos ambos bucles
+	bc.wg.Add(2)
+	go bc.processLocalBlocksLoop()
+	go bc.processBlocksLoop()
 }
 
-func (bc *Blockchain) ProcessBlocks() {
-	bc.lock.Lock()
-	defer bc.lock.Unlock()
+// 2. Separamos la lógica de ProcessLocalBlocks en un bucle dedicado
+func (bc *Blockchain) processLocalBlocksLoop() {
+	defer bc.wg.Done()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
 
-	go func() {
-		for {
-			blk, err := bc.blockPool.ProcessProposedBlocks()
-			if err != nil {
-				bc.logs.WithError(err).Error("Failed to process proposed blocks")
+	for {
+		select {
+		case <-bc.ctx.Done():
+			bc.logs.Info("Stopping local-blocks loop")
+			return
+		case <-ticker.C:
+			bc.lock.Lock()
+			blocks := bc.localBlocks
+			bc.lock.Unlock()
+			if len(blocks) == 0 {
 				continue
 			}
 
+			bc.logs.WithField("local_blocks", len(blocks)).Info("Processing local blocks")
+			for i, blk := range blocks {
+				if blk.Height() == bc.latestBlock.Height() {
+					if err := bc.blockPool.AddProposedBlock(blk); err != nil {
+						bc.logs.WithError(err).Error("Failed to add proposed block")
+						continue
+					}
+					// borramos el bloque procesado de la cola local
+					bc.lock.Lock()
+					bc.localBlocks = append(bc.localBlocks[:i], bc.localBlocks[i+1:]...)
+					bc.lock.Unlock()
+					break
+				}
+			}
+		}
+	}
+}
+
+// 3. Lógica análoga para ProcessBlocks
+func (bc *Blockchain) processBlocksLoop() {
+	defer bc.wg.Done()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-bc.ctx.Done():
+			bc.logs.Info("Stopping block-pool loop")
+			return
+		case <-ticker.C:
+			blk, err := bc.blockPool.ProcessProposedBlocks()
+			if err != nil {
+				continue
+			}
 			if blk == nil {
 				continue
 			}
 
-			if blk.Height() > bc.latestBlock.Height() {
-				bc.logs.WithFields(logrus.Fields{
-					"height": blk.Height(),
-					"hash":   blk.Hash().String(),
-					"txs":    len(blk.Transactions()),
-					"prev":   blk.Prev().String(),
-				}).Info("Saving new block")
+			bc.logs.WithFields(logrus.Fields{
+				"height": blk.Height(),
+				"hash":   blk.Hash().String(),
+			}).Info("Processing proposed block")
 
-				err = saveBlock(bc.db, blk)
-				if err != nil {
+			// sólo guardamos si es la siguiente altura
+			if blk.Height() == bc.latestBlock.Height() {
+				if err := saveBlock(bc.db, blk); err != nil {
 					bc.logs.WithError(err).Error("Failed to save new block")
 					continue
 				}
-
-				bc.latestBlock = blk
 				bc.totalDifficulty += blk.Difficulty()
+				bc.latestBlock = blk
+
+				latestBlock, err := getLatestBlock(bc.db)
+				if err != nil {
+					bc.logs.WithError(err).Error("Failed to get latest block")
+					continue
+				}
+
+				bc.logs.Println("timestamp", latestBlock.Timestamp())
+
+				timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp())
 
 				bc.logs.WithFields(logrus.Fields{
 					"height":           blk.Height(),
-					"hash":             blk.Hash().String(),
 					"total_difficulty": bc.totalDifficulty,
+					"delay":            timeDelta,
 				}).Info("Committed new block")
 			}
 
-			var nextBlock *block.Block
-			for _, b := range bc.localBlocks {
-				if b.Height() == blk.Height()+1 {
-					nextBlock = b
-					break
-				}
-			}
-
-			err = bc.blockPool.AddProposedBlock(nextBlock)
-			if err != nil {
-				bc.logs.WithError(err).Error("Failed to add proposed block")
-				continue
-			}
-
-			err = bc.blockPool.SyncBlockPool(blk.Height())
-			if err != nil {
+			// sincronizamos pool al siguiente número
+			if err := bc.blockPool.SyncBlockPool(blk.Height() + 1); err != nil {
 				bc.logs.WithError(err).Error("Failed to sync block pool")
-				continue
 			}
-
-			time.Sleep(time.Second)
-			bc.logs.WithField("block_pool_synced", true).Info("Block pool synced")
 		}
-	}()
+	}
+}
+
+// 4. Método para parar el procesamiento
+func (bc *Blockchain) Stop() {
+	bc.cancel()
+	bc.wg.Wait()
+	bc.logs.Info("Blockchain processing stopped")
 }
 
 func (bc *Blockchain) GetBlockByHash(hash common.Hash) (*block.Block, error) {

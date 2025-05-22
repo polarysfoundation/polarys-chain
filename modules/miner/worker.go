@@ -47,7 +47,7 @@ func (w *Worker) Run() {
 	w.log.Info("Worker started")
 	go func() {
 		defer w.wg.Done()
-		ticker := time.NewTicker(time.Duration(w.config.PowEngine.Delay) * time.Millisecond)
+		ticker := time.NewTicker(time.Duration(w.config.PowEngine.Delay) * 2 * time.Second)
 		defer ticker.Stop()
 
 		for {
@@ -60,6 +60,13 @@ func (w *Worker) Run() {
 			}
 		}
 	}()
+}
+
+func (w *Worker) Stop() {
+	w.log.Info("Stopping worker...")
+	w.cancel()
+	w.wg.Wait()
+	w.log.Info("Worker stopped")
 }
 
 func (w *Worker) tryProduceBlock() {
@@ -84,8 +91,6 @@ func (w *Worker) tryProduceBlock() {
 		return
 	}
 
-	w.log.Info(latest.Height())
-
 	consensusProof, err := w.engine.ConsensusProof(latest.Height())
 	if err != nil {
 		w.log.Error("Consensus proof error", "err", err)
@@ -99,18 +104,24 @@ func (w *Worker) tryProduceBlock() {
 
 	newBlock, err = w.miner.SignBlock(newBlock, w.config.ChainID)
 	if err != nil {
-		w.log.Error("Block signing failed", "err", err)
+		w.log.Error("Block signing failed ", "err: ", err)
+		return
+	}
+
+	if latest.Height() == newBlock.Height() {
 		return
 	}
 
 	newBlock, err = w.engine.SealBlock(newBlock)
 	if err != nil {
-		w.log.Error("Block sealing failed", "err", err)
+		w.log.Error("Block sealing failed ", "err: ", err)
 		return
 	}
 
+	w.log.WithField("difficulty", newBlock.Difficulty()).Info("Block produced")
+
 	if ok, err := w.engine.VerifyBlock(w.blockchain, newBlock); !ok || err != nil {
-		w.log.Error("Block verification failed", "ok", ok, "err", err)
+		w.log.Error("Block verification failed ", "ok: ", ok, " ", "err: ", err)
 		return
 	}
 
@@ -119,16 +130,16 @@ func (w *Worker) tryProduceBlock() {
 		return
 	}
 
-	w.log.Info("Block produced and added", "height", newBlock.Height(), "hash", newBlock.Hash())
+	w.log.Info("Block produced and added ", "height: ", newBlock.Height(), " ", "hash: ", newBlock.Hash())
 
 	if _, err := w.engine.VerifyChain(w.blockchain); err != nil {
-		w.log.Error("Chain verification failed after block addition", "err", err)
+		w.log.Error("Chain verification failed after block addition ", "err: ", err)
 	}
 }
 
 func (w *Worker) selectTransactions() ([]transaction.Transaction, uint64, uint64) {
 	txs := w.blockchain.GetTransactions()
-	w.log.Debug("Selecting transactions", "count", len(txs))
+	w.log.Debug("Selecting transactions ", "count: ", len(txs))
 	sort.Slice(txs, func(i, j int) bool {
 		return txs[i].GasPrice() > txs[j].GasPrice()
 	})
@@ -154,6 +165,8 @@ func (w *Worker) selectTransactions() ([]transaction.Transaction, uint64, uint64
 
 func (w *Worker) buildHeader(prev *block.Block, nonce, gasUsed, gasTip uint64, valProof, consProof []byte) block.Header {
 	w.log.Debug("Building block header", "prevHeight", prev.Height(), "nonce", nonce)
+
+	// 1) Creamos un header provisional con la dificultad actual (la iremos ajustando)
 	header := block.Header{
 		Height:         prev.Height() + 1,
 		Prev:           prev.Hash(),
@@ -162,13 +175,24 @@ func (w *Worker) buildHeader(prev *block.Block, nonce, gasUsed, gasTip uint64, v
 		GasTarget:      w.blockchain.GasTarget(),
 		GasTip:         gasTip,
 		GasUsed:        gasUsed,
-		Difficulty:     w.blockchain.Difficulty(),
+		Difficulty:     prev.Difficulty(), // provisional
 		Data:           []byte{},
 		Validator:      w.miner.address,
 		ValidatorProof: valProof,
 		ConsensusProof: consProof,
 	}
+
+	w.log.Info("timestamp", header.Timestamp)
+
+	// 2) Recalculamos la nueva dificultad según el motor de consenso
+	//    para lo cual necesitamos un *block.Block provisional*:
+	dummyBlock := block.NewBlock(header, nil)
+	newDiff := w.engine.AdjustDifficulty(dummyBlock, prev)
+
+	// 3) Asignamos la dificultad ajustada y recalculamos el tamaño
+	header.Difficulty = newDiff
 	header.CalculateSize()
+
 	return header
 }
 
@@ -187,13 +211,6 @@ func calcNewNonce(prevNonce uint64, log *logrus.Logger) uint64 {
 	if err == nil {
 		nonce ^= offset.Uint64()
 	}
-	log.Debug("Nonce generated", "nonce", nonce)
+	log.Debug("Nonce generated ", "nonce: ", nonce)
 	return nonce
-}
-
-func (w *Worker) Stop() {
-	w.log.Info("Stopping worker...")
-	w.cancel()
-	w.wg.Wait()
-	w.log.Info("Worker stopped")
 }

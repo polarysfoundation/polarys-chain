@@ -1,6 +1,12 @@
+// --- cmd/node/main.go ---
+
 package main
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/polarysfoundation/polarys-chain/modules/accounts"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core"
@@ -12,57 +18,35 @@ import (
 )
 
 func main() {
-	/* 	addr := common.CXIDToAddress("1cx7fa5a303d068119a5ab0d500daf0ba") */
-
 	logger := logrus.New()
-	logger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
+	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 
+	// Inicialización habitual...
 	accounts := accounts.InitAccounts(logger)
-
-	addr, err := accounts.NewAccount([]byte("test"))
-	if err != nil {
-		panic(err)
-	}
-
-	m := miner.NewMiner(addr, accounts)
-
-	db, err := polarysdb.Init(polarysdb.GenerateKeyFromBytes([]byte("test")), ".polarys")
-	if err != nil {
-		panic(err)
-	}
+	addr, _ := accounts.NewAccount([]byte("test"))
+	db, _ := polarysdb.Init(polarysdb.GenerateKeyFromBytes([]byte("test")), ".polarys")
 
 	config := params.DefaultConfig
 	chainParams := params.Polarys
+	engine := pow.InitConsensus(chainParams.PowEngine.Epoch, chainParams.PowEngine.Difficulty, chainParams.PowEngine.Delay, chainParams.ChainID, []common.Address{addr})
 
-	validators := make([]common.Address, 0)
-
-	validators = append(validators, addr)
-
-	engine := pow.InitConsensus(chainParams.PowEngine.Epoch, chainParams.PowEngine.Difficulty, chainParams.PowEngine.Delay, chainParams.ChainID, validators)
-
-	blockchain, err := core.InitBlockchain(db, config, chainParams, engine, nil, logger)
-	if err != nil {
-		panic(err)
-	}
-
+	blockchain, _ := core.InitBlockchain(db, config, chainParams, engine, nil, logger)
 	engine.SelectValidator()
 
-	worker := miner.NewWorker(m, engine, blockchain, chainParams, logger)
+	// Arrancamos los loops de blockchain y el worker de minería
+	blockchain.Start()
+	worker := miner.NewWorker(miner.NewMiner(addr, accounts), engine, blockchain, chainParams, logger)
+	worker.Run()
 
-	go func() {
-		worker.Run()
-	}()
+	// Capturamos señal de interrupción para apagar en limpio
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	<-sigs
+	logger.Info("Shutting down node...")
 
-	go func() {
-		blockchain.ProcessLocalBlocks()
-	}()
+	// Paramos componentes en orden
+	worker.Stop()
+	blockchain.Stop()
 
-	go func() {
-		blockchain.ProcessBlocks()
-	}()
-
-	select {}
-
+	logger.Info("Node terminated")
 }

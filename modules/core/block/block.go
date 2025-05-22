@@ -86,6 +86,7 @@ func (b *Block) UnmarshalJSON(data []byte) error {
 	b.hash = temp.Hash
 	b.sealHash = temp.SealHash
 	b.slotHash = temp.SlotHash
+	b.transactions = make([]transaction.Transaction, temp.Transactions)
 
 	return nil
 }

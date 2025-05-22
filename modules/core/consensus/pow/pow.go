@@ -147,7 +147,7 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 		return false, err
 	}
 
-	if block.Height() != latestBlock.Height()+1 {
+	if block.Height() <= latestBlock.Height() {
 		return false, ErrInvalidBlockHeight
 	}
 
@@ -177,7 +177,7 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 		return true, nil
 	}
 
-	for i := uint64(1); i <= latestBlock.Height(); i++ { // Start from 1 to avoid underflow
+	for i := uint64(2); i <= latestBlock.Height(); i++ { // Start from 1 to avoid underflow
 		currentBlock, err := chain.GetBlockByHeight(i)
 		if err != nil {
 			return false, err
@@ -196,34 +196,12 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 			return false, ErrInvalidBlockHash
 		}
 
-		target := c.GenerateTarget(currentBlock)
-		if currentBlock.Difficulty() > target.Uint64() {
-			return false, ErrInvalidDifficulty
-		}
-
 		if ok, err := c.DifficultyValidator(currentBlock, prevBlock); err != nil || !ok {
 			return false, ErrInvalidDifficulty
 		}
 	}
 
 	return true, nil
-}
-
-func (c *Consensus) GenerateTarget(block *block.Block) *big.Int {
-	if block == nil {
-		return new(big.Int).SetUint64(MinDifficulty)
-	}
-
-	target := new(big.Int).SetUint64(c.difficulty)
-	if block.Height() == 0 {
-		return target
-	}
-
-	if block.Height()%c.epoch == 0 {
-		target = new(big.Int).Div(target, big.NewInt(int64(DifficultyDivisor)))
-	}
-
-	return target
 }
 
 func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Block) (bool, error) {
@@ -241,8 +219,6 @@ func (c *Consensus) verifyConsensusProof(block *block.Block, prevBlock *block.Bl
 	epoch := common.BytesToUint64(consensusProof[16:24])
 	validatorCount := common.BytesToUint64(consensusProof[24:32])
 	protocolHash := common.BytesToHash(consensusProof[32:])
-
-	log.Println("verifyConsensusProof", "chainID", chainID, "crrBlockNumber", crrBlockNumber, "epoch", epoch, "validatorCount", validatorCount, "protocolHash", protocolHash)
 
 	if crrBlockNumber == prevBlock.Height()+1 {
 		return false, ErrInvalidBlockHeight
@@ -309,28 +285,20 @@ func (c *Consensus) ValidatorExists(address common.Address) bool {
 }
 
 func (c *Consensus) AdjustDifficulty(block *block.Block, prevBlock *block.Block) uint64 {
-	if block == nil || prevBlock == nil {
-		return c.difficulty
-	}
-
-	if block.Height()%c.epoch != 0 {
-		return c.difficulty
-	}
-
-	if block.Height() == 0 {
-		c.difficulty = MinDifficulty
+	// Siempre recalculamos en cada bloque, para que builder y validator
+	// hablen el mismo idioma:
+	if block == nil || prevBlock == nil || block.Height() == 0 {
+		// bloque 0 o nil: sin cambio
 		return c.difficulty
 	}
 
 	newDifficulty := c.calcDifficulty(block, prevBlock)
-	if newDifficulty != c.difficulty {
-		c.difficulty = newDifficulty
-		c.lastAdjustment = block.Height()
-		c.lastDifficulty = newDifficulty
-	}
-
-	c.difficulty = max(min(newDifficulty, MaxDifficulty), MinDifficulty)
-	return c.difficulty
+	// guardamos el valor, respetando rangos
+	bounded := max(min(newDifficulty, MaxDifficulty), MinDifficulty)
+	c.difficulty = bounded
+	c.lastAdjustment = block.Height()
+	c.lastDifficulty = bounded
+	return bounded
 }
 
 func (c *Consensus) DifficultyValidator(block *block.Block, prevBlock *block.Block) (bool, error) {
@@ -368,8 +336,8 @@ func (c *Consensus) calcDifficulty(block *block.Block, prevBlock *block.Block) u
 	if block == nil || prevBlock == nil {
 		return c.difficulty
 	}
-
-	prevDifficulty := c.difficulty
+	
+	prevDifficulty := prevBlock.Difficulty()
 	if block.Height() == 0 {
 		return prevDifficulty
 	}
