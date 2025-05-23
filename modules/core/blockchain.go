@@ -334,12 +334,14 @@ func (bc *Blockchain) processBlocksLoop() {
 				bc.totalDifficulty += blk.Difficulty()
 				bc.latestBlock = blk
 
-				timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp())
+				/* timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp()*1000) */
+
+				timeElapsed := time.Since(time.Unix(int64(latestBlock.Timestamp()), 0))
 
 				bc.logs.WithFields(logrus.Fields{
 					"height":           blk.Height(),
 					"total_difficulty": bc.totalDifficulty,
-					"delay":            fmt.Sprintf("%.2fs", timeDelta),
+					"delay":            fmt.Sprintf("%.2fs", float64(timeElapsed.Seconds())),
 				}).Info("Committed new block")
 			}
 
