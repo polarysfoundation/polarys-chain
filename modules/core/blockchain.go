@@ -334,8 +334,6 @@ func (bc *Blockchain) processBlocksLoop() {
 				bc.totalDifficulty += blk.Difficulty()
 				bc.latestBlock = blk
 
-				/* timeDelta := float64(blk.Timestamp() - latestBlock.Timestamp()*1000) */
-
 				timeElapsed := time.Since(time.Unix(int64(latestBlock.Timestamp()), 0))
 
 				bc.logs.WithFields(logrus.Fields{
