@@ -248,6 +248,35 @@ func (bc *Blockchain) AddBlock(blk *block.Block) error {
 	return nil
 }
 
+func (bc *Blockchain) AddRemoteBlock(block *block.Block) error {
+	bc.lock.Lock()
+	defer bc.lock.Unlock()
+
+	if hasBlock(bc.db, block.Hash()) {
+		return ErrBlockExists
+	}
+
+	if block.Height() <= bc.latestBlock.Height() {
+		return ErrBlockHeight
+	}
+
+	err := saveBlock(bc.db, block)
+	if err != nil {
+		return err
+	}
+
+	bc.latestBlock = block
+
+	return nil
+}
+
+func (bc *Blockchain) HasBlock(hash common.Hash) bool {
+	bc.lock.RLock()
+	defer bc.lock.RUnlock()
+
+	return hasBlock(bc.db, hash)
+}
+
 // 1. Añadimos un método Start() que arranca ambos bucles de procesamiento
 func (bc *Blockchain) Start() {
 	// arrancamos ambos bucles
@@ -525,4 +554,9 @@ func saveBlock(db *polarysdb.Database, blk *block.Block) error {
 	}
 
 	return nil
+}
+
+func hasBlock(db *polarysdb.Database, hash common.Hash) bool {
+	_, ok := db.Read(metricByHash, hash.String())
+	return ok
 }

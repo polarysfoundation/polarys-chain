@@ -61,9 +61,9 @@ func hexEncoder(data []byte) []byte {
 }
 
 func cxidEncoder(data []byte) []byte {
-	buf := make([]byte, (len(data)+1)*2+3) // +1 byteType, *2 hex, +3 "1cx"
+	buf := make([]byte, (len(data))*2+3) // +1 byteType, *2 hex, +3 "1cx"
 	copy(buf[:3], []byte("1cx"))
-	encode(buf[4:], data) // codifica AddressByte + data
+	encode(buf[3:], data) // codifica AddressByte + data
 	return buf
 }
 

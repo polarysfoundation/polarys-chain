@@ -90,7 +90,7 @@ func (h Hash) hex() []byte {
 }
 
 func (h Hash) cxid() []byte {
-	buf := make([]byte, len(h)*3+2)
+	buf := make([]byte, len(h)*2+3)
 	copy(buf[:3], []byte("1cx"))
 	encode(buf[3:], h[:])
 	return buf

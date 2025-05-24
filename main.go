@@ -12,6 +12,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core"
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus/pow"
 	"github.com/polarysfoundation/polarys-chain/modules/miner"
+	"github.com/polarysfoundation/polarys-chain/modules/node"
 	"github.com/polarysfoundation/polarys-chain/modules/params"
 	polarysdb "github.com/polarysfoundation/polarys_db"
 	"github.com/sirupsen/logrus"
@@ -32,6 +33,9 @@ func main() {
 
 	blockchain, _ := core.InitBlockchain(db, config, chainParams, engine, nil, logger)
 	engine.SelectValidator()
+
+	node := node.NewNode(db, logger, blockchain)
+	go node.Run()
 
 	// Arrancamos los loops de blockchain y el worker de minería
 	blockchain.Start()
