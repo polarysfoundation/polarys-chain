@@ -35,6 +35,10 @@ func (p *Peer) ID() []byte {
 	return p.id
 }
 
+func (p *Peer) CXID() string {
+	return common.EncodeToCXID(p.id)
+}
+
 func (p *Peer) Addr() *net.UDPAddr {
 	return p.addr
 }
@@ -68,4 +72,3 @@ func (p *Peer) ValidNonce(nonce []byte) bool {
 
 	return false
 }
-

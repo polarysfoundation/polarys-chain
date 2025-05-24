@@ -18,6 +18,7 @@ const (
 	HASH
 	TRANSACTION
 	ASK
+	DIFF
 )
 
 type Message struct {

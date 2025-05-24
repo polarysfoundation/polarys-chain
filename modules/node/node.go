@@ -21,6 +21,7 @@ type Chain interface {
 	AddRemoteBlock(block *block.Block) error
 	HasBlock(hash common.Hash) bool
 	GetBlockByHash(hash common.Hash) (*block.Block, error)
+	GetLatestBlock() (*block.Block, error)
 }
 
 const (
@@ -28,10 +29,12 @@ const (
 )
 
 type Node struct {
-	self    *p2p.Peer
-	peers   map[string]*p2p.Peer
-	privKey pec256.PrivKey
-	pubKey  pec256.PubKey
+	self             *p2p.Peer
+	peers            map[string]*p2p.Peer
+	privKey          pec256.PrivKey
+	pubKey           pec256.PubKey
+	blocksTransmited map[common.Hash]bool
+	blocksReceived   map[common.Hash]bool
 
 	trustedPeers map[string]bool
 
@@ -53,15 +56,21 @@ func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) *Node {
 	self := p2p.NewPeer(addr, version, pub, uint64(time.Now().Unix()))
 
 	return &Node{
-		self:         self,
-		peers:        make(map[string]*p2p.Peer),
-		trustedPeers: make(map[string]bool),
-		privKey:      priv,
-		pubKey:       pub,
-		db:           db,
-		log:          log,
-		bc:           bc,
+		self:             self,
+		peers:            make(map[string]*p2p.Peer),
+		trustedPeers:     make(map[string]bool),
+		blocksTransmited: make(map[common.Hash]bool),
+		blocksReceived:   make(map[common.Hash]bool),
+		privKey:          priv,
+		pubKey:           pub,
+		db:               db,
+		log:              log,
+		bc:               bc,
 	}
+}
+
+func (n *Node) SetPort(port int) {
+	n.self.Addr().Port = port
 }
 
 func (nd *Node) Run() {
@@ -75,6 +84,8 @@ func (nd *Node) Run() {
 	nd.log.WithField("client_id", common.EncodeToCXID(nd.self.ID())).Infof("Listening on: %s", nd.self.Addr().String())
 
 	go nd.ping(conn)
+
+	go nd.propagateBlock(conn)
 
 	buf := make([]byte, 1024)
 
@@ -150,6 +161,8 @@ func (n *Node) handleMessage(msg *Message, addr *net.UDPAddr, conn *net.UDPConn)
 			return
 		}
 
+		n.blocksReceived[blk.Hash()] = true
+
 		newMessage := NewMessage(HASH, blk.Hash().Bytes(), n.pubKey)
 		newMessage, err = n.signMessage(newMessage)
 		if err != nil {
@@ -159,6 +172,17 @@ func (n *Node) handleMessage(msg *Message, addr *net.UDPAddr, conn *net.UDPConn)
 
 		n.broadcast(newMessage, n.self, conn)
 	case HASH:
+		ok, err := n.verifyMessage(msg)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
+		if !ok {
+			n.log.WithField("client_id", cxid).Error("Invalid signature")
+			return
+		}
+
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -177,6 +201,17 @@ func (n *Node) handleMessage(msg *Message, addr *net.UDPAddr, conn *net.UDPConn)
 			n.response(newMessage, n.peers[cxid], conn)
 		}
 	case ASK:
+		ok, err := n.verifyMessage(msg)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
+		if !ok {
+			n.log.WithField("client_id", cxid).Error("Invalid signature")
+			return
+		}
+
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -203,6 +238,8 @@ func (n *Node) handleMessage(msg *Message, addr *net.UDPAddr, conn *net.UDPConn)
 				n.log.WithField("client_id", cxid).Error(err)
 				return
 			}
+
+			n.blocksTransmited[hashBlock] = true
 
 			n.response(newMessage, n.peers[cxid], conn)
 		}
@@ -298,14 +335,50 @@ func (n *Node) GetPeerByID(id []byte) (*p2p.Peer, error) {
 	return nil, fmt.Errorf("peer not found")
 }
 
+func (n *Node) propagateBlock(conn *net.UDPConn) error {
+	latestBlock, err := n.bc.GetLatestBlock()
+	if err != nil {
+		return err
+	}
+
+	for {
+		time.Sleep(5 * time.Second)
+
+		n.mu.Lock()
+
+		for _, peer := range n.peers {
+			if peer.CXID() != n.self.CXID() {
+				if _, ok := n.blocksTransmited[latestBlock.Hash()]; ok {
+					continue
+				}
+				newMessage := NewMessage(HASH, latestBlock.Hash().Bytes(), n.pubKey)
+				newMessage, err = n.signMessage(newMessage)
+				if err != nil {
+					n.log.WithField("client_id", peer.CXID()).Error(err)
+					continue
+				}
+
+				_, err := conn.WriteToUDP(newMessage.Bytes(), peer.Addr())
+				if err != nil {
+					n.log.WithField("client_id", peer.CXID()).Error(err)
+					continue
+				}
+
+				n.log.WithField("client_id", peer.CXID()).Info("Block proposed")
+			}
+
+		}
+	}
+}
+
 func (n *Node) response(msg *Message, sender *p2p.Peer, conn *net.UDPConn) {
 	_, err := conn.WriteToUDP(msg.Bytes(), sender.Addr())
 	if err != nil {
-		n.log.WithField("client_id", sender.ID()).Error(err)
+		n.log.WithField("client_id", sender.CXID()).Error(err)
 		return
 	}
 
-	n.log.WithField("client_id", sender.ID()).Info("Message sent")
+	n.log.WithField("client_id", sender.CXID()).Info("Message sent")
 }
 
 func (n *Node) broadcast(msg *Message, sender *p2p.Peer, conn *net.UDPConn) {
@@ -314,11 +387,11 @@ func (n *Node) broadcast(msg *Message, sender *p2p.Peer, conn *net.UDPConn) {
 
 			_, err := conn.WriteToUDP(msg.Bytes(), peer.Addr())
 			if err != nil {
-				n.log.WithField("client_id", peer.ID()).Error(err)
+				n.log.WithField("client_id", peer.CXID()).Error(err)
 				continue
 			}
 
-			n.log.WithField("client_id", peer.ID()).Info("Message sent")
+			n.log.WithField("client_id", peer.CXID()).Info("Message sent")
 		}
 	}
 }

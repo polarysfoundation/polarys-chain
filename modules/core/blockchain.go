@@ -19,10 +19,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Node interface {
-	PropagateBlock(block *block.Block) error
-}
-
 type Blockchain struct {
 	chainID         uint64
 	chainConfig     *params.Config
@@ -281,15 +277,12 @@ func (bc *Blockchain) HasBlock(hash common.Hash) bool {
 	return hasBlock(bc.db, hash)
 }
 
-// 1. Añadimos un método Start() que arranca ambos bucles de procesamiento
 func (bc *Blockchain) Start() {
-	// arrancamos ambos bucles
 	bc.wg.Add(2)
 	go bc.processLocalBlocksLoop()
 	go bc.processBlocksLoop()
 }
 
-// 2. Separamos la lógica de ProcessLocalBlocks en un bucle dedicado
 func (bc *Blockchain) processLocalBlocksLoop() {
 	defer bc.wg.Done()
 	ticker := time.NewTicker(3 * time.Second)
@@ -315,7 +308,6 @@ func (bc *Blockchain) processLocalBlocksLoop() {
 						bc.logs.WithError(err).Error("Failed to add proposed block")
 						continue
 					}
-					// borramos el bloque procesado de la cola local
 					bc.lock.Lock()
 					bc.localBlocks = append(bc.localBlocks[:i], bc.localBlocks[i+1:]...)
 					bc.lock.Unlock()
@@ -326,7 +318,6 @@ func (bc *Blockchain) processLocalBlocksLoop() {
 	}
 }
 
-// 3. Lógica análoga para ProcessBlocks
 func (bc *Blockchain) processBlocksLoop() {
 	defer bc.wg.Done()
 	ticker := time.NewTicker(3 * time.Second)
@@ -376,7 +367,6 @@ func (bc *Blockchain) processBlocksLoop() {
 				}).Info("Committed new block")
 			}
 
-			// sincronizamos pool al siguiente número
 			if err := bc.blockPool.SyncBlockPool(blk.Height() + 1); err != nil {
 				bc.logs.WithError(err).Error("Failed to sync block pool")
 			}
@@ -384,7 +374,6 @@ func (bc *Blockchain) processBlocksLoop() {
 	}
 }
 
-// 4. Método para parar el procesamiento
 func (bc *Blockchain) Stop() {
 	bc.cancel()
 	bc.wg.Wait()
