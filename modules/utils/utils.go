@@ -15,3 +15,12 @@ func SecureRandomInt(min, max int) int {
 	}
 	return min + int(nBig.Int64())
 }
+
+func SecureNonce(length int) []byte {
+	nonce := make([]byte, length)
+	_, err := rand.Read(nonce)
+	if err != nil {
+		panic(err)
+	}
+	return nonce
+}

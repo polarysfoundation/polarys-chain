@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"sync"
 	"time"
@@ -119,6 +120,17 @@ func (n *Node) handleMessage(msg *Message, addr *net.UDPAddr, conn *net.UDPConn)
 
 	switch msg.Type {
 	case BLOCK:
+		ok, err := n.verifyMessage(msg)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
+		if !ok {
+			n.log.WithField("client_id", cxid).Error("Invalid signature")
+			return
+		}
+
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -330,6 +342,26 @@ func (n *Node) signMessage(msg *Message) (*Message, error) {
 	copy(signature[32:], s.Bytes())
 
 	return msg.SignMessage(signature), nil
+}
+
+func (n *Node) verifyMessage(msg *Message) (bool, error) {
+	b, err := msg.Marshal()
+	if err != nil {
+		return false, err
+	}
+
+	h := crypto.Pm256(b)
+	signature := msg.Signature
+
+	pubKey, err := msg.DecodePubKey()
+	if err != nil {
+		return false, err
+	}
+
+	r := new(big.Int).SetBytes(signature[:32])
+	s := new(big.Int).SetBytes(signature[32:])
+
+	return crypto.Verify(common.BytesToHash(h), r, s, pubKey)
 }
 
 func (n *Node) ping(conn *net.UDPConn) error {

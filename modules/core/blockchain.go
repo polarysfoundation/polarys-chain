@@ -19,6 +19,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type Node interface {
+	PropagateBlock(block *block.Block) error
+}
+
 type Blockchain struct {
 	chainID         uint64
 	chainConfig     *params.Config

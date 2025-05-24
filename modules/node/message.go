@@ -2,8 +2,11 @@ package node
 
 import (
 	"encoding/json"
+	"time"
 
 	pec256 "github.com/polarysfoundation/pec-256"
+	"github.com/polarysfoundation/polarys-chain/modules/common"
+	"github.com/polarysfoundation/polarys-chain/modules/utils"
 )
 
 type Type int
@@ -24,14 +27,29 @@ type Message struct {
 }
 
 func NewMessage(t Type, d []byte, pubKey pec256.PubKey) *Message {
-	buf := make([]byte, len(d)+32)
+	buf := make([]byte, len(d)+32+16+8) // Data length + pubkey + nonce + timestamp
 	copy(buf, d)
 	copy(buf[len(d):], pubKey[:])
+
+	nonce := utils.SecureNonce(16)
+	now := uint64(time.Now().Unix())
+
+	copy(buf[len(d)+32:], nonce)
+	tBytes := common.Uint64ToBytes(now)
+	copy(buf[len(d)+32+16:], tBytes)
 
 	return &Message{
 		Type: t,
 		Data: d,
 	}
+}
+
+func (m *Message) DecodeNonce() ([]byte, error) {
+	return m.Data[len(m.Data)-16 : 8], nil
+}
+
+func (m *Message) DecodeTimestamp() (uint64, error) {
+	return common.BytesToUint64(m.Data[len(m.Data)-8:]), nil
 }
 
 func (m *Message) DecodePubKey() (pec256.PubKey, error) {
@@ -59,6 +77,7 @@ func (m *Message) Bytes() []byte {
 
 func (m *Message) SignMessage(s []byte) *Message {
 	aux := copyMessage(m)
+
 	aux.Signature = s
 	m = aux
 	return m

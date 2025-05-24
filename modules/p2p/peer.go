@@ -4,6 +4,7 @@ import (
 	"net"
 
 	pec256 "github.com/polarysfoundation/pec-256"
+	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 )
 
@@ -13,6 +14,7 @@ type Peer struct {
 	version  uint32        // version
 	pubKey   pec256.PubKey // public key
 	lastSeen uint64        // last seen time
+	nonces   [][]byte
 }
 
 func NewPeer(addr *net.UDPAddr, version uint32, pubKey pec256.PubKey, lastSeen uint64) *Peer {
@@ -25,6 +27,7 @@ func NewPeer(addr *net.UDPAddr, version uint32, pubKey pec256.PubKey, lastSeen u
 		version:  version,
 		pubKey:   pubKey,
 		lastSeen: lastSeen,
+		nonces:   make([][]byte, 0),
 	}
 }
 
@@ -50,5 +53,19 @@ func (p *Peer) LastSeen() uint64 {
 
 func (p *Peer) SetLastSeen(lastSeen uint64) {
 	p.lastSeen = lastSeen
+}
+
+func (p *Peer) AddNonce(nonce []byte) {
+	p.nonces = append(p.nonces, nonce)
+}
+
+func (p *Peer) ValidNonce(nonce []byte) bool {
+	for _, n := range p.nonces {
+		if !common.Equal(n, nonce) {
+			return true
+		}
+	}
+
+	return false
 }
 
