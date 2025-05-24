@@ -56,6 +56,10 @@ func (c *Consensus) Validator() common.Address {
 	return c.currentValidator
 }
 
+func (c *Consensus) ProtocolHash() common.Hash {
+	return c.protocolHash
+}
+
 func (c *Consensus) ConsensusProof(crrBlockNumber uint64) ([]byte, error) {
 	if crrBlockNumber == 0 {
 		return nil, errors.New("invalid block number")
@@ -336,7 +340,7 @@ func (c *Consensus) calcDifficulty(block *block.Block, prevBlock *block.Block) u
 	if block == nil || prevBlock == nil {
 		return c.difficulty
 	}
-	
+
 	prevDifficulty := prevBlock.Difficulty()
 	if block.Height() == 0 {
 		return prevDifficulty

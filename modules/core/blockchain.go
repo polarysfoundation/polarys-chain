@@ -222,6 +222,10 @@ func (bc *Blockchain) Difficulty() uint64 {
 	return bc.difficulty
 }
 
+func (bc *Blockchain) ProtocolHash() common.Hash {
+	return bc.consensus.ProtocolHash()
+}
+
 func (bc *Blockchain) GetTransactions() []transaction.Transaction {
 	return bc.txPool.GetTransactions()
 }

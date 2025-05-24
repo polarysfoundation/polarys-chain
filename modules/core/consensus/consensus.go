@@ -10,6 +10,8 @@ var (
 )
 
 type Engine interface {
+	ProtocolHash() common.Hash
+
 	ConsensusProof(crrBlockNumber uint64) ([]byte, error)
 	ValidatorProof() ([]byte, error)
 	ValidatorExists(validator common.Address) bool

@@ -19,6 +19,7 @@ const (
 	TRANSACTION
 	ASK
 	DIFF
+	PEER_INFO
 )
 
 type Message struct {

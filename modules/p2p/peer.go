@@ -10,14 +10,14 @@ import (
 
 type Peer struct {
 	id       []byte        // ID node
-	addr     *net.UDPAddr  // ip:port
+	addr     *net.TCPAddr  // ip:port
 	version  uint32        // version
 	pubKey   pec256.PubKey // public key
 	lastSeen uint64        // last seen time
 	nonces   [][]byte
 }
 
-func NewPeer(addr *net.UDPAddr, version uint32, pubKey pec256.PubKey, lastSeen uint64) *Peer {
+func NewPeer(addr *net.TCPAddr, version uint32, pubKey pec256.PubKey, lastSeen uint64) *Peer {
 
 	id := crypto.Pm256(pubKey.Bytes())
 
@@ -39,7 +39,7 @@ func (p *Peer) CXID() string {
 	return common.EncodeToCXID(p.id)
 }
 
-func (p *Peer) Addr() *net.UDPAddr {
+func (p *Peer) Addr() *net.TCPAddr {
 	return p.addr
 }
 

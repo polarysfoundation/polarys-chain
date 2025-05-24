@@ -46,6 +46,10 @@ func EncodeToCXID(data []byte) string {
 	return string(cxidEncoder(data))
 }
 
+func DecodeCXID(s string) []byte {
+	return decode(s[3:])
+}
+
 func Decode(s string) []byte {
 	return decode(s)
 }
