@@ -167,16 +167,37 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 		return
 	}
 
-	n.mu.Lock()
 	id := crypto.Pm256(pubkey.Bytes())
 	cxid := common.EncodeToCXID(id)
+
+	msg, err = msg.DecryptData(n.aesKey)
+	if err != nil {
+		n.log.WithField("client_id", cxid).Error(err)
+		return
+	}
+
+	nonce, err := msg.DecodeNonce()
+	if err != nil {
+		n.log.WithField("client_id", cxid).Error(err)
+		return
+	}
+
+	n.mu.Lock()
 
 	// Update or create peer information
 	if peer, ok := n.peers[cxid]; !ok {
 		addr := conn.RemoteAddr().(*net.TCPAddr)
 		peer = p2p.NewPeer(addr, version, pubkey, uint64(time.Now().Unix()))
+		peer.AddNonce(nonce)
+		validNonce := peer.ValidNonce(nonce)
+		if !validNonce {
+			n.log.WithField("client_id", cxid).Error("Invalid nonce")
+			n.mu.Unlock()
+			return
+		}
 		n.peers[cxid] = peer
 		n.peerConnections[cxid] = conn
+
 	} else {
 		peer.SetLastSeen(uint64(time.Now().Unix()))
 	}
@@ -194,12 +215,6 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		if !ok {
 			n.log.WithField("client_id", cxid).Error("Invalid signature")
-			return
-		}
-
-		msg, err := msg.DecryptData(n.aesKey)
-		if err != nil {
-			n.log.WithField("client_id", cxid).Error(err)
 			return
 		}
 
@@ -249,12 +264,6 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 			return
 		}
 
-		msg, err := msg.DecryptData(n.aesKey)
-		if err != nil {
-			n.log.WithField("client_id", cxid).Error(err)
-			return
-		}
-
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -286,12 +295,6 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		if !ok {
 			n.log.WithField("client_id", cxid).Error("Invalid signature")
-			return
-		}
-
-		msg, err := msg.DecryptData(n.aesKey)
-		if err != nil {
-			n.log.WithField("client_id", cxid).Error(err)
 			return
 		}
 
@@ -340,12 +343,6 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		if !ok {
 			n.log.WithField("client_id", cxid).Error("Invalid signature")
-			return
-		}
-
-		msg, err := msg.DecryptData(n.aesKey)
-		if err != nil {
-			n.log.WithField("client_id", cxid).Error(err)
 			return
 		}
 
