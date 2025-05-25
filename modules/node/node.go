@@ -1,8 +1,11 @@
 package node
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"hash"
+	"io"
 	"math/big"
 	"net"
 	"sync"
@@ -15,6 +18,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/p2p"
 	polarysdb "github.com/polarysfoundation/polarys_db"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/crypto/hkdf"
 )
 
 type Chain interface {
@@ -40,6 +44,8 @@ type Node struct {
 	peerConnections  map[string]net.Conn // Track TCP connections
 	privKey          pec256.PrivKey
 	pubKey           pec256.PubKey
+	secret           []byte
+	aesKey           []byte
 	blocksTransmited map[common.Hash]bool
 	blocksReceived   map[common.Hash]bool
 
@@ -52,7 +58,7 @@ type Node struct {
 	mu  sync.RWMutex
 }
 
-func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) *Node {
+func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) (*Node, error) {
 	priv, pub := crypto.GenerateKey()
 
 	addr := &net.TCPAddr{
@@ -61,6 +67,13 @@ func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) *Node {
 	}
 
 	self := p2p.NewPeer(addr, version, pub, uint64(time.Now().Unix()))
+
+	secret := crypto.GenerateSharedKey(priv)
+
+	aesKey, err := deriveAESKey(secret.Bytes())
+	if err != nil {
+		return nil, err
+	}
 
 	return &Node{
 		self:             self,
@@ -74,7 +87,9 @@ func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) *Node {
 		db:               db,
 		log:              log,
 		bc:               bc,
-	}
+		secret:           secret.Bytes(),
+		aesKey:           aesKey,
+	}, nil
 }
 
 func (n *Node) SetPort(port int) {
@@ -182,6 +197,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 			return
 		}
 
+		msg, err := msg.DecryptData(n.aesKey)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -203,7 +224,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		n.blocksReceived[blk.Hash()] = true
 
-		newMessage := NewMessage(HASH, blk.Hash().Bytes(), n.pubKey)
+		newMessage, err := NewMessage(HASH, blk.Hash().Bytes(), n.pubKey, n.aesKey)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
 		newMessage, err = n.signMessage(newMessage)
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -223,6 +249,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 			return
 		}
 
+		msg, err := msg.DecryptData(n.aesKey)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
+			return
+		}
+
 		data, err := msg.DecodeData()
 		if err != nil {
 			n.log.WithField("client_id", cxid).Error(err)
@@ -231,7 +263,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		hashBlock := common.BytesToHash(data)
 		if !n.bc.HasBlock(hashBlock) {
-			newMessage := NewMessage(ASK, data, n.pubKey)
+			newMessage, err := NewMessage(ASK, data, n.pubKey, n.aesKey)
+			if err != nil {
+				n.log.WithField("client_id", cxid).Error(err)
+				return
+			}
+
 			newMessage, err = n.signMessage(newMessage)
 			if err != nil {
 				n.log.WithField("client_id", cxid).Error(err)
@@ -249,6 +286,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		if !ok {
 			n.log.WithField("client_id", cxid).Error("Invalid signature")
+			return
+		}
+
+		msg, err := msg.DecryptData(n.aesKey)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
 			return
 		}
 
@@ -272,7 +315,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 				return
 			}
 
-			newMessage := NewMessage(BLOCK, b, n.pubKey)
+			newMessage, err := NewMessage(BLOCK, b, n.pubKey, n.aesKey)
+			if err != nil {
+				n.log.WithField("client_id", cxid).Error(err)
+				return
+			}
+
 			newMessage, err = n.signMessage(newMessage)
 			if err != nil {
 				n.log.WithField("client_id", cxid).Error(err)
@@ -292,6 +340,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 
 		if !ok {
 			n.log.WithField("client_id", cxid).Error("Invalid signature")
+			return
+		}
+
+		msg, err := msg.DecryptData(n.aesKey)
+		if err != nil {
+			n.log.WithField("client_id", cxid).Error(err)
 			return
 		}
 
@@ -360,7 +414,12 @@ func (n *Node) handleMessage(msg *Message, conn net.Conn) {
 					return
 				}
 
-				nMsg := NewMessage(BLOCK, b, n.pubKey)
+				nMsg, err := NewMessage(BLOCK, b, n.pubKey, n.aesKey)
+				if err != nil {
+					n.log.WithField("client_id", cxid).Error(err)
+					return
+				}
+
 				signedMsg, err := n.signMessage(nMsg)
 				if err != nil {
 					n.log.WithField("client_id", cxid).Error(err)
@@ -406,7 +465,11 @@ func (n *Node) ConnectToPeer(addr *net.TCPAddr) error {
 		return err
 	}
 
-	msg := NewMessage(PEER_INFO, data, n.pubKey)
+	msg, err := NewMessage(PEER_INFO, data, n.pubKey, n.aesKey)
+	if err != nil {
+		return err
+	}
+
 	signedMsg, err := n.signMessage(msg)
 	if err != nil {
 		conn.Close()
@@ -537,7 +600,12 @@ func (n *Node) propagateBlock() error {
 				if _, ok := n.blocksTransmited[latestBlock.Hash()]; ok {
 					continue
 				}
-				newMessage := NewMessage(HASH, latestBlock.Hash().Bytes(), n.pubKey)
+				newMessage, err := NewMessage(HASH, latestBlock.Hash().Bytes(), n.pubKey, n.aesKey)
+				if err != nil {
+					n.log.WithField("client_id", peer.CXID()).Error(err)
+					continue
+				}
+
 				newMessage, err = n.signMessage(newMessage)
 				if err != nil {
 					n.log.WithField("client_id", peer.CXID()).Error(err)
@@ -669,7 +737,12 @@ func (n *Node) ping() {
 				continue
 			}
 
-			pingMsg := NewMessage(PING, []byte(fmt.Sprintf("%d", now)), n.pubKey)
+			pingMsg, err := NewMessage(PING, []byte(fmt.Sprintf("%d", now)), n.pubKey, n.aesKey)
+			if err != nil {
+				n.log.WithField("client_id", cxid).Error(err)
+				continue
+			}
+
 			signedPing, err := n.signMessage(pingMsg)
 			if err != nil {
 				n.log.WithField("client_id", cxid).Error(err)
@@ -686,4 +759,14 @@ func (n *Node) ping() {
 
 		n.mu.Unlock()
 	}
+}
+
+// Deriva clave AES-GCM a partir de un secreto ECDH
+func deriveAESKey(secret []byte) ([]byte, error) {
+	hk := hkdf.New(func() hash.Hash { return sha256.New() }, secret, nil, nil)
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(hk, key); err != nil {
+		return nil, err
+	}
+	return key, nil
 }

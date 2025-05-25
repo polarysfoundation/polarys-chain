@@ -34,7 +34,11 @@ func main() {
 	blockchain, _ := core.InitBlockchain(db, config, chainParams, engine, nil, logger)
 	engine.SelectValidator()
 
-	node := node.NewNode(db, logger, blockchain)
+	node, err := node.NewNode(db, logger, blockchain)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
 	go node.Run()
 
 	// Arrancamos los loops de blockchain y el worker de minería
