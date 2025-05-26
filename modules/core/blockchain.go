@@ -65,8 +65,6 @@ func InitBlockchain(db *prydb.Database, config *params.Config, chainParams *para
 		cancel:          cancel,
 	}
 
-	gasPool := gaspool.InitGasPool()
-
 	if !hasGenesisBlock(db) {
 		bc.logs.Info("Genesis block not found, initializing genesis")
 
@@ -165,11 +163,8 @@ func InitBlockchain(db *prydb.Database, config *params.Config, chainParams *para
 
 		bc.latestBlock = blk
 		bc.totalDifficulty += blk.Difficulty()
-		bc.logs.WithFields(logrus.Fields{
-			"latest_height":    blk.Height(),
-			"latest_hash":      blk.Hash().String(),
-			"total_difficulty": bc.totalDifficulty,
-		}).Info("Genesis block saved")
+
+		bc.db.CommitBlock(latestBlock)
 	}
 
 	bc.latestBlock = latestBlock
@@ -186,10 +181,12 @@ func InitBlockchain(db *prydb.Database, config *params.Config, chainParams *para
 		return nil, err
 	}
 
+	bc.gaspool = gaspool.InitGasPool()
+
 	bc.consensus = engine
 	bc.consensusProof = consensusProof
 
-	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof, gasPool, latestBlock)
+	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof, bc.gaspool, bc.latestBlock)
 	if err != nil {
 		bc.logs.WithError(err).Error("Failed to initialize transaction pool")
 		return nil, err
@@ -433,13 +430,12 @@ func getBlockByHashAndHeight(db *prydb.Database, hash common.Hash, height uint64
 		}
 	}
 
-	txs, err := db.GetTransactionsByBlockHeight(height)
-	if err != nil {
-		return nil, err
-	}
+	txs, _ := db.GetTransactionsByBlockHeight(height)
 
-	for _, tx := range txs {
-		blk.AddTransaction(*tx)
+	if len(txs) > 0 {
+		for _, tx := range txs {
+			blk.AddTransaction(*tx)
+		}
 	}
 
 	return blk, nil

@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"hash"
 	"log"
 	"math/big"
 
@@ -53,6 +54,10 @@ func GenerateSharedKey(priv pec256.PrivKey) pec256.SharedKey {
 
 func Verify(data common.Hash, r, s *big.Int, pub pec256.PubKey) (bool, error) {
 	return c.Verify(data[:], r, s, pub.BigInt())
+}
+
+func NewPM256() hash.Hash {
+	return pm256.New256()
 }
 
 func GetPubKey(priv pec256.PrivKey) pec256.PubKey {

@@ -37,7 +37,7 @@ func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint6
 
 	h := crypto.Pm256(executor.Bytes())
 	poolAddress := crypto.CreateAddress(executor, 0, common.BytesToHash(h))
-	if db.TxPoolExist(poolAddress) {
+	if db.TxPoolExist(poolAddress, latestBlock) {
 		balance, timestamp, epoch, executor, hash, err := db.TxPoolState(poolAddress, latestBlock)
 		if err != nil {
 			return nil, err
@@ -87,6 +87,8 @@ func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint6
 		consensusProof:      consensusProof,
 		gaspool:             gaspool,
 		hash:                common.BytesToHash(h2),
+		totalTransactions:   0,
+		latestBlock:         latestBlock,
 	}
 
 	return pool, nil

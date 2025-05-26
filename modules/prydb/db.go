@@ -26,6 +26,7 @@ func InitDB() (*Database, error) {
 	database := &Database{
 		db:             db,
 		cachedAccounts: make(map[common.Address]*account),
+		cachedTxPools:  make(map[common.Address]*txPool),
 	}
 	if err := database.initialize(); err != nil {
 		return nil, err
@@ -115,7 +116,7 @@ func (db *Database) commitBlock(block *block.Block) error {
 func (db *Database) LatestBlock() (*block.Block, error) {
 	data, ok := db.db.Read(blocksLatest, "latest")
 	if !ok {
-		return nil, nil
+		return nil, ErrBlockNotFound
 	}
 
 	var block *block.Block
@@ -152,7 +153,7 @@ func (db *Database) GetBlockByHash(hash common.Hash) (*block.Block, error) {
 }
 
 func (db *Database) GetBlockByHeight(height uint64) (*block.Block, error) {
-	data, ok := db.db.Read(blocksByHash, strconv.FormatUint(height, 10))
+	data, ok := db.db.Read(blocksByHeight, strconv.FormatUint(height, 10))
 	if !ok {
 		return nil, ErrBlockNotFound
 	}
@@ -677,8 +678,8 @@ func (db *Database) UpdateTxPoolBalance(address common.Address, amount uint64, b
 
 }
 
-func (db *Database) TxPoolExist(address common.Address) bool {
-	txpool, err := db.getTxPool(address, nil)
+func (db *Database) TxPoolExist(address common.Address, block *block.Block) bool {
+	txpool, err := db.getTxPool(address, block)
 	if err != nil {
 		return false
 	}

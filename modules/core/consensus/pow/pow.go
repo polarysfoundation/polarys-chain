@@ -121,6 +121,8 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 		return false, ErrNilBlock
 	}
 
+	log.Println(block.Height())
+
 	prevBlock, err := chain.GetBlockByHeight(block.Height() - 1)
 	if err != nil {
 		return false, err

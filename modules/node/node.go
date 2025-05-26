@@ -1,10 +1,8 @@
 package node
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"hash"
 	"io"
 	"math/big"
 	"net"
@@ -760,7 +758,7 @@ func (n *Node) ping() {
 
 // Deriva clave AES-GCM a partir de un secreto ECDH
 func deriveAESKey(secret []byte) ([]byte, error) {
-	hk := hkdf.New(func() hash.Hash { return sha256.New() }, secret, nil, nil)
+	hk := hkdf.New(crypto.NewPM256, secret, nil, nil)
 	key := make([]byte, 32)
 	if _, err := io.ReadFull(hk, key); err != nil {
 		return nil, err
