@@ -2,6 +2,7 @@ package txpool
 
 import (
 	"math/big"
+	"sort"
 	"sync"
 	"time"
 
@@ -131,10 +132,47 @@ func (t *TxPool) ProcessTransaction() {
 		copy(seal[:32], h1)
 		copy(seal[32:], h2)
 
-		for _, tx := range t.pendingTransactions {
+		transactions := t.copyTransactions()
+
+		if len(transactions) == 0 {
+			break
+		}
+
+		sort.Slice(transactions, func(i, j int) bool {
+			return transactions[i].Gas() > transactions[j].Gas()
+		})
+
+		for _, tx := range transactions {
 			copy(seal[64:], tx.Hash().Bytes())
 			sealHash := crypto.Pm256(seal)
 			tx.SealTx(common.BytesToHash(sealHash))
+
+			balance, _ := t.db.BalanceAt(tx.From(), t.latestBlock)
+			if balance < tx.Value().Uint64()+tx.Gas() {
+				continue
+			} else {
+				newBalance := balance - tx.Value().Uint64() - tx.GasPrice()
+				t.db.UpdateBalance(tx.From(), newBalance, t.latestBlock)
+
+				receiverBalance, _ := t.db.BalanceAt(tx.To(), t.latestBlock)
+
+				if receiverBalance == 0 {
+					t.db.InitAccountState(tx.To(), []byte{}, t.latestBlock)
+				}
+
+				receiverBalance += tx.Value().Uint64()
+				t.db.UpdateBalance(tx.To(), receiverBalance, t.latestBlock)
+
+			}
+
+			gasCost, err := t.gaspool.CalcGas(tx.Bytes(), len(tx.Payload()), tx.Value().BitLen(), tx.GasTip())
+			if err != nil {
+				continue
+			}
+
+			if gasCost != tx.Gas() {
+				continue
+			}
 
 			t.sealedTransactions = append(t.sealedTransactions, tx)
 		}
@@ -156,4 +194,12 @@ func (t *TxPool) AddBalance(amount uint64) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.poolBalance += amount
+}
+
+func (t *TxPool) copyTransactions() []transaction.Transaction {
+
+	transactions := make([]transaction.Transaction, len(t.pendingTransactions))
+	copy(transactions, t.pendingTransactions)
+
+	return transactions
 }

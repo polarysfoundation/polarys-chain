@@ -87,6 +87,15 @@ func (t *Transaction) Hash() common.Hash {
 	return t.hash
 }
 
+func (t *Transaction) Bytes() []byte {
+	b, err := t.data.marshal()
+	if err != nil {
+		panic(err)
+	}
+
+	return b
+}
+
 func (t *Transaction) CalcHash() {
 	data, err := t.data.marshal()
 	if err != nil {
