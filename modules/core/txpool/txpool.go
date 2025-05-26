@@ -175,8 +175,7 @@ func (t *TxPool) ProcessTransaction() {
 	copy(seal[32:], h2)
 
 	for _, tx := range t.pendingTransactions {
-		h3 := crypto.Pm256(tx.Hash().Bytes())
-		copy(seal[64:], h3)
+		copy(seal[64:], tx.Hash().Bytes())
 		sealHash := crypto.Pm256(seal)
 		tx.SealTx(common.BytesToHash(sealHash))
 

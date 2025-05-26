@@ -6,8 +6,8 @@ import (
 	"time"
 
 	pec256 "github.com/polarysfoundation/pec-256"
-	pm256 "github.com/polarysfoundation/pm-256"
 	"github.com/polarysfoundation/polarys-chain/modules/common"
+	"github.com/polarysfoundation/polarys-chain/modules/core/gaspool"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 )
 
@@ -17,8 +17,8 @@ type Transaction struct {
 	sealHash common.Hash
 }
 
-func NewTransaction(from common.Address, to common.Address, value *big.Int, data []byte, nonce uint64, gasPrice uint64, version Version, payload []byte) *Transaction {
-	txData := TxData{
+func NewTransaction(from common.Address, to common.Address, value *big.Int, data []byte, nonce uint64, gasPrice uint64, version Version, payload []byte, gasTarget uint64) (*Transaction, error) {
+	txData := &TxData{
 		From:      from,
 		To:        to,
 		Value:     value,
@@ -30,9 +30,18 @@ func NewTransaction(from common.Address, to common.Address, value *big.Int, data
 		Timestamp: uint64(time.Now().Unix()),
 	}
 
-	return &Transaction{
-		data: txData,
+	tx := &Transaction{
+		data: *txData,
 	}
+
+	tx.CalcHash()
+
+	tx, err := calcGas(gasTarget, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return tx, nil
 }
 
 func (t *Transaction) MarshalJSON() ([]byte, error) {
@@ -75,19 +84,18 @@ func (t *Transaction) UnmarshalJSON(data []byte) error {
 }
 
 func (t *Transaction) Hash() common.Hash {
-	if t.hash.IsValid() {
-		return t.hash
-	}
+	return t.hash
+}
 
+func (t *Transaction) CalcHash() {
 	data, err := t.data.marshal()
 	if err != nil {
 		panic(err)
 	}
 
-	hash := pm256.Sum256(data)
+	hash := crypto.Pm256(data)
 
-	t.hash = common.BytesToHash(hash[:])
-	return t.hash
+	t.hash = common.BytesToHash(hash)
 }
 
 func (t *Transaction) SignTransaction(signature []byte) *Transaction {
@@ -108,10 +116,6 @@ func (t *Transaction) VerifyTx(pub pec256.PubKey) (bool, error) {
 	s := new(big.Int).SetBytes(t.data.Signature[32:])
 
 	return crypto.Verify(common.BytesToHash(h), r, s, pub)
-}
-
-func (t *Transaction) CalcGas() {
-
 }
 
 func (t *Transaction) Gas() uint64 {
@@ -172,4 +176,35 @@ func copyTransaction(tx *Transaction) *Transaction {
 		hash:     tx.hash,
 		sealHash: tx.sealHash,
 	}
+}
+
+func (t *Transaction) Timestamp() uint64 {
+	return t.data.Timestamp
+}
+
+func (t *Transaction) CalcGas(gasTarget uint64) (*Transaction, error) {
+	return calcGas(gasTarget, t)
+}
+
+func calcGas(gasTarget uint64, tx *Transaction) (*Transaction, error) {
+	aux := copyTransaction(tx)
+
+	payloadLen := uint64(len(aux.data.Payload))
+
+	data, err := aux.data.marshal()
+	if err != nil {
+		return nil, err
+	}
+
+	dataLen := len(data)
+
+	gasCost, gasTip, err := gaspool.CalcGas(gasTarget, tx.data.GasPrice, dataLen, int(payloadLen), tx.data.Value.BitLen())
+	if err != nil {
+		return nil, err
+	}
+
+	aux.data.Gas = gasCost
+	aux.data.GasTip = gasTip
+
+	return aux, err
 }
