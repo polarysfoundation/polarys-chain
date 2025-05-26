@@ -189,7 +189,7 @@ func InitBlockchain(db *prydb.Database, config *params.Config, chainParams *para
 	bc.consensus = engine
 	bc.consensusProof = consensusProof
 
-	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof, gasPool)
+	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof, gasPool, latestBlock)
 	if err != nil {
 		bc.logs.WithError(err).Error("Failed to initialize transaction pool")
 		return nil, err

@@ -1,27 +1,22 @@
 package txpool
 
 import (
-	"encoding/json"
 	"math/big"
 	"sync"
 	"time"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
+	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	"github.com/polarysfoundation/polarys-chain/modules/core/gaspool"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 )
 
-var (
-	metric         = "txpool/"
-	metricAccounts = "accounts/"
-)
-
 type TxPool struct {
 	poolAddress         common.Address
 	executor            common.Address
-	poolBalance         *big.Int
+	poolBalance         uint64
 	timestamp           uint64
 	consensusProof      []byte
 	minimalGasTip       uint64
@@ -31,93 +26,58 @@ type TxPool struct {
 	sealedTransactions  []transaction.Transaction
 	totalTransactions   uint64
 	gaspool             *gaspool.GasPool
+	latestBlock         *block.Block
+	hash                common.Hash
 
 	db    *prydb.Database
 	mutex sync.RWMutex
 }
 
-func (t *TxPool) Unmarshal(data []byte) error {
-	temp := struct {
-		PoolAddress       common.Address `json:"pool_address"`
-		Executor          common.Address `json:"executor"`
-		PoolBalance       *big.Int       `json:"pool_balance"`
-		Timestamp         uint64         `json:"timestamp"`
-		ConsensusProof    []byte         `json:"consensus_proof"`
-		MinimalGasTip     uint64         `json:"minimal_gas_tip"`
-		GasProcessed      *big.Int       `json:"gas_processed"`
-		NextEpoch         uint64         `json:"next_epoch"`
-		TotalTransactions uint64         `json:"total_transactions"`
-	}{}
-
-	err := json.Unmarshal(data, &temp)
-	if err != nil {
-		return err
-	}
-
-	t.poolAddress = temp.PoolAddress
-	t.executor = temp.Executor
-	t.poolBalance = temp.PoolBalance
-	t.timestamp = temp.Timestamp
-	t.consensusProof = temp.ConsensusProof
-	t.minimalGasTip = temp.MinimalGasTip
-	t.gasProcessed = temp.GasProcessed
-	t.nextEpoch = temp.NextEpoch
-	t.totalTransactions = temp.TotalTransactions
-
-	return nil
-}
-
-func (t *TxPool) Marshal() ([]byte, error) {
-	temp := struct {
-		PoolAddress       common.Address `json:"pool_address"`
-		Executor          common.Address `json:"executor"`
-		PoolBalance       *big.Int       `json:"pool_balance"`
-		Timestamp         uint64         `json:"timestamp"`
-		ConsensusProof    []byte         `json:"consensus_proof"`
-		MinimalGasTip     uint64         `json:"minimal_gas_tip"`
-		GasProcessed      *big.Int       `json:"gas_processed"`
-		NextEpoch         uint64         `json:"next_epoch"`
-		TotalTransactions uint64         `json:"total_transactions"`
-	}{
-		PoolAddress:       t.poolAddress,
-		Executor:          t.executor,
-		PoolBalance:       t.poolBalance,
-		Timestamp:         t.timestamp,
-		ConsensusProof:    t.consensusProof,
-		MinimalGasTip:     t.minimalGasTip,
-		GasProcessed:      t.gasProcessed,
-		NextEpoch:         t.nextEpoch,
-		TotalTransactions: t.totalTransactions,
-	}
-
-	b, err := json.Marshal(temp)
-	if err != nil {
-		return nil, err
-	}
-
-	return b, nil
-}
-
-func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint64, consensusProof []byte, gaspool *gaspool.GasPool) (*TxPool, error) {
+func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint64, consensusProof []byte, gaspool *gaspool.GasPool, latestBlock *block.Block) (*TxPool, error) {
 
 	h := crypto.Pm256(executor.Bytes())
 	poolAddress := crypto.CreateAddress(executor, 0, common.BytesToHash(h))
-	if exist(db, poolAddress) {
-		pool, err := getTxPool(db, poolAddress)
+	if db.TxPoolExist(poolAddress) {
+		balance, timestamp, epoch, executor, hash, err := db.TxPoolState(poolAddress, latestBlock)
 		if err != nil {
 			return nil, err
 		}
 
+		pool := &TxPool{
+			poolAddress:         poolAddress,
+			executor:            executor,
+			db:                  db,
+			poolBalance:         balance,
+			timestamp:           timestamp,
+			nextEpoch:           epoch,
+			consensusProof:      consensusProof,
+			minimalGasTip:       minimalGasTip,
+			gaspool:             gaspool,
+			latestBlock:         latestBlock,
+			hash:                hash,
+			pendingTransactions: make([]transaction.Transaction, 0),
+			sealedTransactions:  make([]transaction.Transaction, 0),
+			gasProcessed:        big.NewInt(0),
+			totalTransactions:   0,
+		}
+
 		return pool, nil
+
 	}
 
 	threeDaysEpoch := 3 * 24 * 60 * 60
+
+	buff := make([]byte, 30)
+	copy(buff[:15], executor.Bytes())
+	copy(buff[15:], poolAddress.Bytes())
+
+	h2 := crypto.Pm256(buff)
 
 	pool := &TxPool{
 		poolAddress:         poolAddress,
 		executor:            executor,
 		db:                  db,
-		poolBalance:         big.NewInt(0),
+		poolBalance:         0,
 		timestamp:           uint64(time.Now().Unix()),
 		pendingTransactions: make([]transaction.Transaction, 0),
 		sealedTransactions:  make([]transaction.Transaction, 0),
@@ -126,6 +86,7 @@ func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint6
 		nextEpoch:           uint64(time.Now().Unix()) + uint64(threeDaysEpoch),
 		consensusProof:      consensusProof,
 		gaspool:             gaspool,
+		hash:                common.BytesToHash(h2),
 	}
 
 	return pool, nil
@@ -180,16 +141,17 @@ func (t *TxPool) ProcessTransaction() {
 	}
 }
 
-func (t *TxPool) Update() error {
+func (t *TxPool) Update(latestBlock *block.Block) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
+	t.latestBlock = latestBlock
 
 	return nil
 }
 
-func (t *TxPool) AddBalance(amount *big.Int) {
+func (t *TxPool) AddBalance(amount uint64) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	t.poolBalance.Add(t.poolBalance, amount)
+	t.poolBalance += amount
 }

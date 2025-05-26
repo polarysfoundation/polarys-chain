@@ -677,6 +677,15 @@ func (db *Database) UpdateTxPoolBalance(address common.Address, amount uint64, b
 
 }
 
+func (db *Database) TxPoolExist(address common.Address) bool {
+	txpool, err := db.getTxPool(address, nil)
+	if err != nil {
+		return false
+	}
+
+	return txpool != nil
+}
+
 func (db *Database) commitTxPool(address common.Address, block *block.Block, txpool *txPool) error {
 	err := db.db.Write(fmt.Sprintf(txPools, strconv.FormatUint(block.Height(), 10)), address.CXID(), txpool)
 	if err != nil {
@@ -684,4 +693,37 @@ func (db *Database) commitTxPool(address common.Address, block *block.Block, txp
 	}
 
 	return nil
+}
+
+func (db *Database) TxPoolState(address common.Address, block *block.Block) (uint64, uint64, uint64, common.Address, common.Hash, error) {
+	var err error
+	if block == nil {
+		block, err = db.LatestBlock()
+		if err != nil {
+			return 0, 0, 0, common.Address{}, common.Hash{}, err
+		}
+	}
+
+	txpool, ok := db.cachedTxPools[address]
+	if !ok {
+		txpool, err = db.getTxPool(address, block)
+		if err != nil {
+			return 0, 0, 0, common.Address{}, common.Hash{}, err
+
+		}
+
+		db.cachedTxPools[address] = txpool
+	}
+
+	if block.Height() != txpool.latestUpdate {
+		txpool, err = db.getTxPool(address, block)
+		if err != nil {
+			return 0, 0, 0, common.Address{}, common.Hash{}, err
+		}
+
+		db.cachedTxPools[address] = txpool
+	}
+
+	return txpool.balance, txpool.timestamp, txpool.epoch, txpool.executor, txpool.hash, nil
+
 }
