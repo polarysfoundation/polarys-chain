@@ -16,7 +16,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 	"github.com/polarysfoundation/polarys-chain/modules/p2p"
-	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/hkdf"
 )
@@ -53,12 +53,12 @@ type Node struct {
 
 	bc Chain
 
-	db  *polarysdb.Database
+	db  *prydb.Database
 	log *logrus.Logger
 	mu  sync.RWMutex
 }
 
-func NewNode(db *polarysdb.Database, log *logrus.Logger, bc Chain) (*Node, error) {
+func NewNode(db *prydb.Database, log *logrus.Logger, bc Chain) (*Node, error) {
 	priv, pub := crypto.GenerateKey()
 
 	addr := &net.TCPAddr{

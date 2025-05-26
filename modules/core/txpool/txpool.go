@@ -7,13 +7,15 @@ import (
 	"time"
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
+	"github.com/polarysfoundation/polarys-chain/modules/core/gaspool"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
-	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 )
 
 var (
-	metric = "txpool/"
+	metric         = "txpool/"
+	metricAccounts = "accounts/"
 )
 
 type TxPool struct {
@@ -28,8 +30,9 @@ type TxPool struct {
 	pendingTransactions []transaction.Transaction
 	sealedTransactions  []transaction.Transaction
 	totalTransactions   uint64
+	gaspool             *gaspool.GasPool
 
-	db    *polarysdb.Database
+	db    *prydb.Database
 	mutex sync.RWMutex
 }
 
@@ -95,13 +98,7 @@ func (t *TxPool) Marshal() ([]byte, error) {
 	return b, nil
 }
 
-func InitTxPool(db *polarysdb.Database, executor common.Address, minimalGasTip uint64, consensusProof []byte) (*TxPool, error) {
-	if !db.Exist(metric) {
-		err := db.Create(metric)
-		if err != nil {
-			return nil, err
-		}
-	}
+func InitTxPool(db *prydb.Database, executor common.Address, minimalGasTip uint64, consensusProof []byte, gaspool *gaspool.GasPool) (*TxPool, error) {
 
 	h := crypto.Pm256(executor.Bytes())
 	poolAddress := crypto.CreateAddress(executor, 0, common.BytesToHash(h))
@@ -128,11 +125,7 @@ func InitTxPool(db *polarysdb.Database, executor common.Address, minimalGasTip u
 		gasProcessed:        big.NewInt(0),
 		nextEpoch:           uint64(time.Now().Unix()) + uint64(threeDaysEpoch),
 		consensusProof:      consensusProof,
-	}
-
-	err := save(db, pool)
-	if err != nil {
-		return nil, err
+		gaspool:             gaspool,
 	}
 
 	return pool, nil
@@ -168,18 +161,22 @@ func (t *TxPool) ProcessTransaction() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	seal := make([]byte, 96)
-	h1 := crypto.Pm256(t.poolAddress.Bytes())
-	h2 := crypto.Pm256(t.executor.Bytes())
-	copy(seal[:32], h1)
-	copy(seal[32:], h2)
+	for {
+		seal := make([]byte, 96)
+		h1 := crypto.Pm256(t.poolAddress.Bytes())
+		h2 := crypto.Pm256(t.executor.Bytes())
+		copy(seal[:32], h1)
+		copy(seal[32:], h2)
 
-	for _, tx := range t.pendingTransactions {
-		copy(seal[64:], tx.Hash().Bytes())
-		sealHash := crypto.Pm256(seal)
-		tx.SealTx(common.BytesToHash(sealHash))
+		for _, tx := range t.pendingTransactions {
+			copy(seal[64:], tx.Hash().Bytes())
+			sealHash := crypto.Pm256(seal)
+			tx.SealTx(common.BytesToHash(sealHash))
 
-		t.sealedTransactions = append(t.sealedTransactions, tx)
+			t.sealedTransactions = append(t.sealedTransactions, tx)
+		}
+
+		t.pendingTransactions = make([]transaction.Transaction, 0)
 	}
 }
 
@@ -187,10 +184,6 @@ func (t *TxPool) Update() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	err := save(t.db, t)
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -199,38 +192,4 @@ func (t *TxPool) AddBalance(amount *big.Int) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.poolBalance.Add(t.poolBalance, amount)
-}
-
-func save(db *polarysdb.Database, pool *TxPool) error {
-	err := db.Write(metric, pool.poolAddress.String(), pool)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func exist(db *polarysdb.Database, poolAddress common.Address) bool {
-	_, ok := db.Read(metric, poolAddress.String())
-	return ok
-}
-
-func getTxPool(db *polarysdb.Database, poolAddress common.Address) (*TxPool, error) {
-	data, ok := db.Read(metric, poolAddress.String())
-	if !ok {
-		return nil, ErrNotFound
-	}
-
-	var txPool TxPool
-	b, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	err = txPool.Unmarshal(b)
-	if err != nil {
-		return nil, err
-	}
-
-	return &txPool, nil
 }

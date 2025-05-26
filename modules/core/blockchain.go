@@ -2,9 +2,7 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -12,10 +10,11 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
 	"github.com/polarysfoundation/polarys-chain/modules/core/blockpool"
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus"
+	"github.com/polarysfoundation/polarys-chain/modules/core/gaspool"
 	"github.com/polarysfoundation/polarys-chain/modules/core/transaction"
 	"github.com/polarysfoundation/polarys-chain/modules/core/txpool"
 	"github.com/polarysfoundation/polarys-chain/modules/params"
-	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 	"github.com/sirupsen/logrus"
 )
 
@@ -37,13 +36,14 @@ type Blockchain struct {
 	ctx             context.Context
 	wg              sync.WaitGroup
 	cancel          context.CancelFunc
+	gaspool         *gaspool.GasPool
 
 	logs *logrus.Logger
-	db   *polarysdb.Database
+	db   *prydb.Database
 	lock sync.RWMutex
 }
 
-func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *params.ChainParams, engine consensus.Engine, genesis *GenesisBlock, logs *logrus.Logger) (*Blockchain, error) {
+func InitBlockchain(db *prydb.Database, config *params.Config, chainParams *params.ChainParams, engine consensus.Engine, genesis *GenesisBlock, logs *logrus.Logger) (*Blockchain, error) {
 	logs.WithFields(logrus.Fields{
 		"chain_id": chainParams.ChainID,
 	}).Info("Initializing blockchain")
@@ -64,6 +64,8 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		ctx:             ctx,
 		cancel:          cancel,
 	}
+
+	gasPool := gaspool.InitGasPool()
 
 	if !hasGenesisBlock(db) {
 		bc.logs.Info("Genesis block not found, initializing genesis")
@@ -159,12 +161,6 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 		blk := block.NewBlock(header, nil)
 		blk.CalcHash()
 
-		err = saveBlock(db, blk)
-		if err != nil {
-			bc.logs.WithError(err).Error("Failed to save genesis block")
-			return nil, err
-		}
-
 		latestBlock = blk
 
 		bc.latestBlock = blk
@@ -177,7 +173,6 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	}
 
 	bc.latestBlock = latestBlock
-	bc.totalDifficulty += latestBlock.Difficulty()
 
 	bc.logs.WithFields(logrus.Fields{
 		"latest_height":    latestBlock.Height(),
@@ -194,7 +189,7 @@ func InitBlockchain(db *polarysdb.Database, config *params.Config, chainParams *
 	bc.consensus = engine
 	bc.consensusProof = consensusProof
 
-	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof)
+	txPool, err := txpool.InitTxPool(db, common.Address{}, uint64(config.MinimalGasTip), consensusProof, gasPool)
 	if err != nil {
 		bc.logs.WithError(err).Error("Failed to initialize transaction pool")
 		return nil, err
@@ -256,7 +251,7 @@ func (bc *Blockchain) AddRemoteBlock(block *block.Block) error {
 	bc.lock.Lock()
 	defer bc.lock.Unlock()
 
-	if hasBlock(bc.db, block.Hash()) {
+	if bc.hasBlock(block.Hash()) {
 		return ErrBlockExists
 	}
 
@@ -264,7 +259,7 @@ func (bc *Blockchain) AddRemoteBlock(block *block.Block) error {
 		return ErrBlockHeight
 	}
 
-	err := saveBlock(bc.db, block)
+	err := bc.db.CommitBlock(block)
 	if err != nil {
 		return err
 	}
@@ -278,7 +273,16 @@ func (bc *Blockchain) HasBlock(hash common.Hash) bool {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
 
-	return hasBlock(bc.db, hash)
+	return bc.hasBlock(hash)
+}
+
+func (bc *Blockchain) hasBlock(hash common.Hash) bool {
+	blk, err := bc.db.GetBlockByHash(hash)
+	if err != nil {
+		return false
+	}
+
+	return blk != nil
 }
 
 func (bc *Blockchain) Start() {
@@ -348,13 +352,13 @@ func (bc *Blockchain) processBlocksLoop() {
 
 			// sólo guardamos si es la siguiente altura
 			if blk.Height() == bc.latestBlock.Height() {
-				latestBlock, err := getLatestBlock(bc.db)
+				latestBlock, err := bc.db.LatestBlock()
 				if err != nil {
 					bc.logs.WithError(err).Error("Failed to get latest block")
 					continue
 				}
 
-				if err := saveBlock(bc.db, blk); err != nil {
+				if err := bc.db.CommitBlock(blk); err != nil {
 					bc.logs.WithError(err).Error("Failed to save new block")
 					continue
 				}
@@ -409,151 +413,38 @@ func (bc *Blockchain) GetLatestBlock() (*block.Block, error) {
 	bc.lock.RLock()
 	defer bc.lock.RUnlock()
 
-	return getLatestBlock(bc.db)
+	return bc.db.LatestBlock()
 }
 
-func getLatestBlock(db *polarysdb.Database) (*block.Block, error) {
-	data, ok := db.Read(metricCurrent, "latest_block")
-	if !ok {
-		return nil, ErrBlockNotFound
-	}
-
-	var blk block.Block
-
-	b, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(b, &blk)
-	if err != nil {
-		return nil, err
-	}
-
-	txs, err := getTransactionsByBlockNumber(db, blk.Height())
-	if err != nil {
-		return nil, err
-	}
-
-	for _, tx := range txs {
-		blk.AddTransaction(tx)
-	}
-
-	return &blk, nil
-}
-
-func getBlockByHashAndHeight(db *polarysdb.Database, hash common.Hash, height uint64) (*block.Block, error) {
-	var data any
-	var ok bool
+func getBlockByHashAndHeight(db *prydb.Database, hash common.Hash, height uint64) (*block.Block, error) {
+	var err error
+	var blk *block.Block
 
 	if !hash.IsValid() {
-		data, ok = db.Read(metricByNumber, strconv.FormatUint(height, 10))
-		if !ok {
-			return nil, ErrBlockNotFound
+		blk, err = db.GetBlockByHeight(height)
+		if err != nil {
+			return nil, err
 		}
+
 	} else {
-		data, ok = db.Read(metricByHash, hash.String())
-		if !ok {
-			return nil, ErrBlockNotFound
+		blk, err = db.GetBlockByHash(hash)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	var blk block.Block
-
-	b, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-
-	txs, err := getTransactionsByBlockNumber(db, height)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(b, &blk)
+	txs, err := db.GetTransactionsByBlockHeight(height)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, tx := range txs {
-		blk.AddTransaction(tx)
+		blk.AddTransaction(*tx)
 	}
 
-	return &blk, nil
-}
-
-func getTransactionsByBlockNumber(db *polarysdb.Database, height uint64) ([]transaction.Transaction, error) {
-	if !db.Exist(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10))) {
-		err := db.Create(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10)))
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	data, err := db.ReadBatch(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(height, 10)))
-	if err != nil {
-		return nil, err
-	}
-
-	txs := make([]transaction.Transaction, 0)
-
-	for _, v := range data {
-		var tx transaction.Transaction
-
-		b, err := json.Marshal(v)
-		if err != nil {
-			return nil, err
-		}
-
-		err = json.Unmarshal(b, &tx)
-		if err != nil {
-			return nil, err
-		}
-
-		txs = append(txs, tx)
-	}
-
-	return txs, nil
+	return blk, nil
 }
 
 func (bc *Blockchain) GasTarget() uint64 {
 	return bc.gasTarget
-}
-
-func saveBlock(db *polarysdb.Database, blk *block.Block) error {
-	err := db.Write(metricByNumber, strconv.FormatUint(blk.Height(), 10), blk)
-	if err != nil {
-		return err
-	}
-
-	err = db.Write(metricByHash, blk.Hash().String(), blk)
-	if err != nil {
-		return err
-	}
-
-	err = db.Write(metricCurrent, "latest_block", blk)
-	if err != nil {
-		return err
-	}
-
-	if len(blk.Transactions()) > 0 {
-		for _, tx := range blk.Transactions() {
-			err = db.Write(fmt.Sprintf(metricTransactionsByBlockNumber, strconv.FormatUint(blk.Height(), 10)), tx.Hash().String(), tx)
-			if err != nil {
-				return err
-			}
-
-			err = db.Write(fmt.Sprintf(metricTransactionsByBlockHash, blk.Hash().String()), tx.Hash().String(), tx)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func hasBlock(db *polarysdb.Database, hash common.Hash) bool {
-	_, ok := db.Read(metricByHash, hash.String())
-	return ok
 }

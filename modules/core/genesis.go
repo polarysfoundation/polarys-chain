@@ -6,7 +6,7 @@ import (
 
 	"github.com/polarysfoundation/polarys-chain/modules/common"
 	"github.com/polarysfoundation/polarys-chain/modules/core/block"
-	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 )
 
 var (
@@ -32,11 +32,7 @@ type GenesisBlock struct {
 	Size            uint64         `json:"size"`
 }
 
-func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBlock, consensusProof []byte) (*GenesisBlock, error) {
-	err := checkMetrics(db)
-	if err != nil {
-		return nil, err
-	}
+func InitGenesisBlock(db *prydb.Database, dfChain bool, genesis *GenesisBlock, consensusProof []byte) (*GenesisBlock, error) {
 
 	if hasGenesisBlock(db) {
 		return getGenesisBlock(db)
@@ -50,7 +46,7 @@ func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBloc
 			return nil, err
 		}
 
-		err = saveBlock(db, blk)
+		err = db.CommitBlock(blk)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +57,7 @@ func InitGenesisBlock(db *polarysdb.Database, dfChain bool, genesis *GenesisBloc
 			return nil, err
 		}
 
-		err = saveBlock(db, blk)
+		err = db.CommitBlock(blk)
 		if err != nil {
 			return nil, err
 		}
@@ -199,51 +195,21 @@ func (g *GenesisBlock) Serialize() ([]byte, error) {
 
 	return b, nil
 }
-
-func checkMetrics(db *polarysdb.Database) error {
-	if !db.Exist(metricCurrent) {
-		err := db.Create(metricCurrent)
-		if err != nil {
-			return err
-		}
-	}
-
-	if !db.Exist(metricByNumber) {
-		err := db.Create(metricByNumber)
-		if err != nil {
-			return err
-		}
-	}
-
-	if !db.Exist(metricByHash) {
-		err := db.Create(metricByHash)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func hasGenesisBlock(db *polarysdb.Database) bool {
-	_, ok := db.Read(metricCurrent, "0")
-	return ok
-}
-
-func getGenesisBlock(db *polarysdb.Database) (*GenesisBlock, error) {
-	data, ok := db.Read(metricByNumber, "0")
-	if !ok {
-		return nil, ErrBlockNotFound
-	}
-
-	var g *block.Block
-
-	b, err := json.Marshal(data)
+func hasGenesisBlock(db *prydb.Database) bool {
+	blk, err := db.GetBlockByHeight(0)
 	if err != nil {
-		return nil, err
+		return false
 	}
 
-	err = json.Unmarshal(b, &g)
+	if blk != nil {
+		return true
+	} else {
+		return false
+	}
+}
+
+func getGenesisBlock(db *prydb.Database) (*GenesisBlock, error) {
+	g, err := db.GetBlockByHeight(0)
 	if err != nil {
 		return nil, err
 	}

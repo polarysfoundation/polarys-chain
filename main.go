@@ -14,7 +14,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/miner"
 	"github.com/polarysfoundation/polarys-chain/modules/node"
 	"github.com/polarysfoundation/polarys-chain/modules/params"
-	polarysdb "github.com/polarysfoundation/polarys_db"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 	"github.com/sirupsen/logrus"
 )
 
@@ -25,7 +25,7 @@ func main() {
 	// Inicialización habitual...
 	accounts := accounts.InitAccounts(logger)
 	addr, _ := accounts.NewAccount([]byte("test"))
-	db, _ := polarysdb.Init(polarysdb.GenerateKeyFromBytes([]byte("test")), ".polarys")
+	db, _ := prydb.InitDB()
 
 	config := params.DefaultConfig
 	chainParams := params.Polarys

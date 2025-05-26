@@ -11,6 +11,7 @@ import (
 	"github.com/polarysfoundation/polarys-chain/modules/core/consensus"
 	"github.com/polarysfoundation/polarys-chain/modules/crypto"
 	"github.com/polarysfoundation/polarys-chain/modules/params"
+	"github.com/polarysfoundation/polarys-chain/modules/prydb"
 	polarysdb "github.com/polarysfoundation/polarys_db"
 )
 
@@ -29,18 +30,11 @@ type BlockPool struct {
 
 	engine consensus.Engine
 
-	db   *polarysdb.Database
+	db   *prydb.Database
 	lock sync.RWMutex
 }
 
-func NewBlockPool(engine consensus.Engine, db *polarysdb.Database, latestBlock uint64, config *params.Config, chainID uint64, epoch uint64) (*BlockPool, error) {
-	if !db.Exist(metric) {
-		err := db.Create(metric)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func NewBlockPool(engine consensus.Engine, db *prydb.Database, latestBlock uint64, config *params.Config, chainID uint64, epoch uint64) (*BlockPool, error) {
 	consensusProof, err := engine.ConsensusProof(latestBlock)
 	if err != nil {
 		return nil, err
@@ -98,11 +92,6 @@ func (pb *BlockPool) ProcessProposedBlocks() (*block.Block, error) {
 
 	selectedBlock := validBlocks[0]
 	selectedBlock.SetSlotHash(pb.slotHash)
-
-	err := saveCurrentSlotHash(pb.db, selectedBlock.SlotHash())
-	if err != nil {
-		return nil, err
-	}
 
 	pb.proposedBlocks = make([]*block.Block, 0)
 
