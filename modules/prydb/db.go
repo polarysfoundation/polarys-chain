@@ -196,6 +196,28 @@ func (db *Database) commitTransaction(transaction *transaction.Transaction, bloc
 
 }
 
+func (db *Database) BlockHasTransaction(hash common.Address, block *block.Block) (bool, error) {
+	_, ok := db.db.Read(fmt.Sprintf(transactionsByBlockHash, block.Hash().CXID()), hash.CXID())
+	if !ok {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (db *Database) BlockHasTransactions(block *block.Block) (bool, error) {
+	data, err := db.db.ReadBatch(fmt.Sprintf(transactionsByBlockHash, block.Hash().CXID()))
+	if err != nil {
+		return false, nil
+	}
+
+	if len(data) == 0 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (db *Database) GetTransactionByHash(hash common.Hash) (*transaction.Transaction, error) {
 	data, ok := db.db.Read(transactionsByHash, hash.CXID())
 	if !ok {

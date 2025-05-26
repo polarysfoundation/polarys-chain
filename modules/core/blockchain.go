@@ -430,12 +430,17 @@ func getBlockByHashAndHeight(db *prydb.Database, hash common.Hash, height uint64
 		}
 	}
 
-	txs, _ := db.GetTransactionsByBlockHeight(height)
+	if ok, err := db.BlockHasTransactions(blk); err != nil {
+		return nil, err
+	} else if ok {
+		txs, _ := db.GetTransactionsByBlockHeight(height)
 
-	if len(txs) > 0 {
-		for _, tx := range txs {
-			blk.AddTransaction(*tx)
+		if len(txs) > 0 {
+			for _, tx := range txs {
+				blk.AddTransaction(*tx)
+			}
 		}
+
 	}
 
 	return blk, nil

@@ -121,8 +121,6 @@ func (c *Consensus) VerifyBlock(chain consensus.Chain, block *block.Block) (bool
 		return false, ErrNilBlock
 	}
 
-	log.Println(block.Height())
-
 	prevBlock, err := chain.GetBlockByHeight(block.Height() - 1)
 	if err != nil {
 		return false, err
@@ -194,7 +192,9 @@ func (c *Consensus) VerifyChain(chain consensus.Chain) (bool, error) {
 			return false, err
 		}
 
-		if !common.Equal(currentBlock.Hash().Bytes(), currentBlock.CalcHash().Bytes()) {
+		hash := currentBlock.CalcHash()
+
+		if !common.Equal(currentBlock.Hash().Bytes(), hash.Bytes()) {
 			return false, ErrInvalidBlockHash
 		}
 
