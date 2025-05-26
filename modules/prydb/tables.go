@@ -10,4 +10,6 @@ var (
 	transactionsByBlockHash   = "blocks/hash/%s/transactions/"
 	transactionsByBlockHeight = "blocks/height/%s/transactions/"
 	accounts                  = "accounts/block_%s/"
+	txPools                   = "txpool/block_%s"
+	transactionsByTxPool      = "txpool/%s/transactions/"
 )
